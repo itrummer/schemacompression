@@ -56,12 +56,12 @@ class ForeignKey():
     to_columns: List[str]
 
 
-@dataclass
+#@dataclass
 class Schema():
     """ A schema is defined by tables and constraints. """
-    tables: List[Table]
-    pkeys: List[PrimaryKey]
-    fkeys: List[ForeignKey]
+    # tables: List[Table]
+    # pkeys: List[PrimaryKey]
+    # fkeys: List[ForeignKey]
     
     def __init__(self, tables, pkeys, fkeys):
         """ Initialize for given tables, primary, and foreign keys.
@@ -95,7 +95,7 @@ class Schema():
             else:
                 self.fkeys.append(fkey)
     
-    def annotations(self):
+    def get_annotations(self):
         """ Returns all annotations. """
         tags = set()
         for table in self.tables:
@@ -104,20 +104,23 @@ class Schema():
         
         return list(tags)
     
-    def columns(self):
+    def get_columns(self):
         """ Returns all columns. """
-        columns = []
+        columns = set()
         for table in self.tables:
-            tbl_name = table.name
             for column in table.columns:
                 col_name = column.name
-                full_name = f'{tbl_name}.{col_name}'
-                columns.append(full_name)
+                if col_name in columns:
+                    tbl_name = table.name
+                    full_name = f'{tbl_name}.{col_name}'
+                    columns.add(full_name)
+                else:
+                    columns.add(col_name)
         
-        return columns
+        return list(columns)
     
-    def facts(self):
-        """ Returns list of facts describing schema. """
+    def get_facts(self):
+        """ Returns tuple with true facts and false facts. """
         facts = []
         for table in self.tables:
             tbl_name = table.name
@@ -129,7 +132,7 @@ class Schema():
                 for annotation in column.annotations:
                     facts += [(col_name, annotation)]
         
-        return facts
+        return facts, []
     
     def sql(self):
         """ DDL commands for creating schema. 
@@ -139,7 +142,7 @@ class Schema():
         """
         return '\n'.join([t.sql() for t in self.tables])
     
-    def tables(self):
+    def get_tables(self):
         """ Returns all table names. """
         return [t.name for t in self.tables]
     

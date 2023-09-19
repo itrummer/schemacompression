@@ -4,6 +4,8 @@ Created on Sep 13, 2023
 @author: immanueltrummer
 '''
 from pulp import LpMinimize, LpProblem, LpStatus, lpSum, LpVariable, get_solver
+import logging
+import pulp
 
 
 class IlpCompression():
@@ -18,15 +20,55 @@ class IlpCompression():
         """
         self.schema = schema
         self.max_depth = max_depth
-        self.tables = schema.tables()
-        self.columns = schema.columns()
-        self.annotations = schema.annotations()
-        self.ids = self.tables + self.columns + self.annotations
+        self.tables = schema.get_tables()
+        self.columns = schema.get_columns()
+        self.annotations = schema.get_annotations()
+        self.ids = self.tables + self.columns + \
+            self.annotations + ['table', 'column']
         self.tokens = self.ids + ['(', ')']
-        self.facts = schema.facts()
-        self.max_length = 3 * len(self.facts)
+        
+        logging.debug(f'Tables: {self.tables}')
+        logging.debug(f'Columns: {self.columns}')
+        logging.debug(f'Annotations: {self.annotations}')
+        logging.debug(f'IDs: {self.ids}')
+        logging.debug(f'Tokens: {self.tokens}')
+        
+        self.true_facts, self.false_facts = schema.get_facts()
+        self.max_length = 3 * len(self.true_facts)
         self.decision_vars, self.context_vars, self.fact_vars = self._variables()
         self.model = LpProblem(name='Schema compression', sense=LpMinimize)
+        self._add_constraints()
+        self._add_objective()
+
+    def compress(self):
+        """ Solve compression problem and return solution.
+        
+        Returns:
+            Compressed representation of schema.
+        """
+        solver = pulp.GLPK('/opt/homebrew/bin/glpsol', timeLimit=10)
+        # solver = get_solver('GLPK_CMD', path='/opt/homebrew/bin/glpsol', maxSeconds=10)
+        self.model.solve(solver)
+        # Extract solution
+        parts = []
+        for pos in range(self.max_length):
+            for token in self.ids:
+                if self.decision_vars[pos][token].value() >= 0.5:
+                    parts += [token]
+            
+            for token in ['(', ')']:
+                if self.decision_vars[pos][token].value() >= 0.5:
+                    parts += [token]
+        
+        for pos in range(self.max_length):
+            for token in self.tokens:
+                decision_var = self.decision_vars[pos][token]
+                print(f'{decision_var.name} = {decision_var.varValue}')
+        
+        for fact_var in self.fact_vars.values():
+            print(f'{fact_var.name} = {fact_var.varValue}')
+        
+        return ''.join(parts)
 
     def _add_constraints(self):
         """ Adds constraints to internal model. """
@@ -93,11 +135,11 @@ class IlpCompression():
             cur_activations = {}
             activations.append(cur_activations)
             for token in self.ids:
-                token_var = self.decision_var[pos][token]
+                token_var = self.decision_vars[pos][token]
                 name = f'Activate_P{pos}_{token}'
                 activation = LpVariable(
                     name=name, lowBound=0, 
-                    highBound=1, cat='Integer')
+                    upBound=1, cat='Integer')
                 self.model += activation <= opening
                 self.model += activation <= token_var
                 self.model += activation >= opening + token_var - 1
@@ -113,20 +155,60 @@ class IlpCompression():
                     cur = self.context_vars[pos_2][depth][token]
                     self.model += cur == prior + activation
         
+        def get_mention_var(outer_token, inner_token, pos, depth):
+            """ Generate variable representing fact mention.
+            
+            Args:
+                outer_token: token that appears in context.
+                inner_token: token that appears within context.
+                pos: position at which mention occurs.
+                depth: depth of relevant context.
+            """
+            outer_var = self.context_vars[pos][depth][outer_token]
+            inner_var = self.decision_vars[pos][inner_token]
+            name = f'Mention_P{pos}_D{depth}_{outer_token}_{inner_token}'
+            mention_var = LpVariable(
+                name=name, lowBound=0, upBound=1, cat='Integer')
+            self.model += mention_var <= outer_var
+            self.model += mention_var <= inner_var
+            self.model += mention_var >= -1 + outer_var + inner_var
+            return mention_var
+
         # Link facts to nested tokens
         for token_1 in self.ids:
             for token_2 in self.ids:
                 if token_1 < token_2:
                     # Sum over possible mentions
-                    mentions = []
+                    mention_vars = []
                     for pos in range(self.max_length):
                         for depth in range(self.max_depth):
-                            context_var = self.context_vars[pos][depth][token_1]
+                            mention_var_1 = get_mention_var(
+                                token_1, token_2, pos, depth)
+                            mention_var_2 = get_mention_var(
+                                token_2, token_1, pos, depth)
+                            mention_vars += [mention_var_1, mention_var_2]
+                            
                     fact_key = frozenset({token_1, token_2})
                     fact_var = self.fact_vars[fact_key]
-                
-                scaling = 1.0 / (self.max_length * self.max_depth)
-
+                    self.model += fact_var <= lpSum(mention_vars)
+                    for mention_var in mention_vars:
+                        self.model += fact_var >= mention_var
+        
+        # Make sure that true facts are mentioned
+        for token_1, token_2 in self.true_facts:
+            fact_key = frozenset({token_1, token_2})
+            fact_var = self.fact_vars[fact_key]
+            self.model += fact_var >= 1
+    
+    def _add_objective(self):
+        """ Add optimization objective. """
+        token_vars = []
+        for pos in range(self.max_length):
+            for token in self.tokens:
+                token_var = self.decision_vars[pos][token]
+                token_vars.append(token_var)
+        self.model += lpSum(token_vars)
+    
     def _variables(self):
         """ Returns variables for input schema. 
         
@@ -141,7 +223,7 @@ class IlpCompression():
                 name = f'P{pos}_{token}'
                 decision_var = LpVariable(
                     name=name, lowBound=0, 
-                    highBound=1, cat='Integer')
+                    upBound=1, cat='Integer')
                 cur_pos_vars[token] = decision_var
             decision_vars.append(cur_pos_vars)
         
@@ -157,7 +239,7 @@ class IlpCompression():
                     name = f'P{pos}_D{depth}_{context_id}'
                     context_var = LpVariable(
                         name=name, lowBound=0,
-                        highBound=1, cat='Integer')
+                        upBound=1, cat='Integer')
                     cur_depth_vars[context_id] = context_var
         
         # Access by fact_vars[frozenset([id_1, id_2])]
@@ -168,29 +250,30 @@ class IlpCompression():
                     fact_name = f'{id_1}_{id_2}'
                     fact_var = LpVariable(
                         name=fact_name, lowBound=0, 
-                        highBound=1, cat='Integer')
-                    ids = frozenset(id_1, id_2)
+                        upBound=1, cat='Integer')
+                    ids = frozenset({id_1, id_2})
                     fact_vars[ids] = fact_var
         
+        logging.debug(f'Fact variable keys: {fact_vars.keys()}')
         return decision_vars, context_vars, fact_vars
         
 
 # Create the model
-model = LpProblem(name="small-problem", sense=LpMinimize)
-
-# Initialize the decision variables
-x = LpVariable(name="x", lowBound=0)
-y = LpVariable(name="y", lowBound=0)
-
-# Add the constraints to the model
-model += (2 * x + y <= 20, "red_constraint")
-model += (4 * x - 5 * y >= -10, "blue_constraint")
-model += (-x + 2 * y >= -2, "yellow_constraint")
-model += (-x + 5 * y == 15, "green_constraint")
-
-# Add the objective function to the model
-model += lpSum([x, 2 * y])
-
-# Solve the problem
-solver = get_solver('GLPK_CMD', path='/opt/homebrew/bin/glpsol')
-status = model.solve(solver=solver)
+# model = LpProblem(name="small-problem", sense=LpMinimize)
+#
+# # Initialize the decision variables
+# x = LpVariable(name="x", lowBound=0)
+# y = LpVariable(name="y", lowBound=0)
+#
+# # Add the constraints to the model
+# model += (2 * x + y <= 20, "red_constraint")
+# model += (4 * x - 5 * y >= -10, "blue_constraint")
+# model += (-x + 2 * y >= -2, "yellow_constraint")
+# model += (-x + 5 * y == 15, "green_constraint")
+#
+# # Add the objective function to the model
+# model += lpSum([x, 2 * y])
+#
+# # Solve the problem
+# solver = get_solver('GLPK_CMD', path='/opt/homebrew/bin/glpsol')
+# status = model.solve(solver=solver)

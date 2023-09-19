@@ -5,7 +5,9 @@ Created on Sep 7, 2023
 '''
 import argparse
 import json
+import logging
 import openai
+import sc.compress.ilp
 import sc.compress.types
 import sc.compress.default_types
 import sc.llm
@@ -19,6 +21,7 @@ if __name__ == '__main__':
     parser.add_argument('aikey', type=str, help='API key of OpenAI')
     args = parser.parse_args()
     
+    logging.basicConfig(level=logging.DEBUG)
     openai.api_key = args.aikey
     model = 'gpt-3.5-turbo'
     with open(args.file) as file:
@@ -38,12 +41,17 @@ if __name__ == '__main__':
         #compressed_1_size = sc.llm.nr_tokens(model, compressed_1)
         compressed_2_size = sc.llm.nr_tokens(model, compressed_2)
         
+        ilpCompression = sc.compress.ilp.IlpCompression(schema)
+        result = ilpCompression.compress()
+        print(result)
+        
         print(f'Original\n{raw_description}')
         print(f'Compressed\n{compressed_2}')
         
         #compressed_size = min(compressed_1_size, compressed_2_size)
         compressed_size = compressed_2_size
         compressed_total += compressed_size
+        break
         
         # if raw_size < compressed_size:
             # print(raw_description)
