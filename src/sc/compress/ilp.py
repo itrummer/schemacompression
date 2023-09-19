@@ -3,7 +3,7 @@ Created on Sep 13, 2023
 
 @author: immanueltrummer
 '''
-from pulp import LpMinimize, LpProblem, LpStatus, lpSum, LpVariable, get_solver
+from pulp import LpMinimize, LpMaximize, LpProblem, LpStatus, lpSum, LpVariable, get_solver
 import logging
 import pulp
 
@@ -36,9 +36,15 @@ class IlpCompression():
         self.true_facts, self.false_facts = schema.get_facts()
         self.max_length = 3 * len(self.true_facts)
         self.decision_vars, self.context_vars, self.fact_vars = self._variables()
-        self.model = LpProblem(name='Schema compression', sense=LpMinimize)
+        
+        print(self.decision_vars)
+        print(self.context_vars)
+        print(self.fact_vars)
+        
+        self.model = LpProblem(name='Schema compression', sense=LpMaximize)
         self._add_constraints()
         self._add_objective()
+        print(self.model)
 
     def compress(self):
         """ Solve compression problem and return solution.
@@ -46,7 +52,7 @@ class IlpCompression():
         Returns:
             Compressed representation of schema.
         """
-        solver = pulp.GLPK('/opt/homebrew/bin/glpsol', timeLimit=10)
+        solver = pulp.GLPK('/opt/homebrew/bin/glpsol', timeLimit=60)
         # solver = get_solver('GLPK_CMD', path='/opt/homebrew/bin/glpsol', maxSeconds=10)
         self.model.solve(solver)
         # Extract solution
@@ -77,30 +83,30 @@ class IlpCompression():
             opening = self.decision_vars[pos]['(']
             closing = self.decision_vars[pos][')']
             self.model += opening + closing <= 1
-        
-        # Select at most one ID token per position
+            
+        # # Select at most one ID token per position
         for pos in range(self.max_length):
             token_vars = [self.decision_vars[pos][token] for token in self.ids]
             self.model += lpSum(token_vars) <= 1
-        
-        # Balance opening and closing parentheses
+            
+        # # Balance opening and closing parentheses
         opening = [decisions['('] for decisions in self.decision_vars]
         closing = [decisions[')'] for decisions in self.decision_vars]
         self.model += lpSum(opening) == lpSum(closing)
         
-        # Never more closing than opening parenthesis!
+        # # Never more closing than opening parenthesis!
         for pos in range(self.max_length):
-            opening = [ds['('] for ds in self.decision_vars[:pos]]
-            closing = [ds[')'] for ds in self.decision_vars[:pos]]
+            opening = [ds['('] for ds in self.decision_vars[:pos+1]]
+            closing = [ds[')'] for ds in self.decision_vars[:pos+1]]
             self.model += lpSum(opening) >= lpSum(closing)
-        
-        # Each context layer fixes at most one token
+            
+        # # Each context layer fixes at most one token
         for pos in range(self.max_length):
             for depth in range(self.max_depth):
                 self.model += lpSum(
                     self.context_vars[pos][depth].values()) <= 1
-        
-        # Context layers are used consecutively
+                    
+        # # Context layers are used consecutively
         for pos in range(self.max_length):
             for depth_1 in range(self.max_depth-1):
                 depth_2 = depth_1 + 1
@@ -112,9 +118,9 @@ class IlpCompression():
         context_by_pos = []
         for pos in range(self.max_length):
             pos_vars = []
-            context_by_pos.append(pos_vars)
             for depth in range(self.max_depth):
-                pos_vars += self.context_vars[pos][depth].values()
+                pos_vars += list(self.context_vars[pos][depth].values())
+            context_by_pos.append(pos_vars)
         
         # Initial context is empty
         self.model += lpSum(context_by_pos[0]) == 0
@@ -133,7 +139,6 @@ class IlpCompression():
         for pos in range(self.max_length):
             opening = self.decision_vars[pos]['(']
             cur_activations = {}
-            activations.append(cur_activations)
             for token in self.ids:
                 token_var = self.decision_vars[pos][token]
                 name = f'Activate_P{pos}_{token}'
@@ -144,16 +149,17 @@ class IlpCompression():
                 self.model += activation <= token_var
                 self.model += activation >= opening + token_var - 1
                 cur_activations[token] = activation
+            activations.append(cur_activations)
         
         # Set context variables as function of prior context and activation
         for pos_1 in range(self.max_length-1):
             pos_2 = pos_1 + 1
-            for depth in range(self.max_depth):
-                for token in self.ids:
-                    prior = self.context_vars[pos_1][depth][token]
-                    activation = activations[pos_1][token]
-                    cur = self.context_vars[pos_2][depth][token]
-                    self.model += cur == prior + activation
+            for token in self.ids:
+                activation_var = activations[pos_1][token]
+                token_vars = [
+                    self.context_vars[pos_2][d][token]
+                    for d in range(self.max_depth)]
+                self.model += lpSum(token_vars) >= activation_var
         
         def get_mention_var(outer_token, inner_token, pos, depth):
             """ Generate variable representing fact mention.
@@ -195,10 +201,11 @@ class IlpCompression():
                         self.model += fact_var >= mention_var
         
         # Make sure that true facts are mentioned
-        for token_1, token_2 in self.true_facts:
-            fact_key = frozenset({token_1, token_2})
-            fact_var = self.fact_vars[fact_key]
-            self.model += fact_var >= 1
+        # self.model += self.fact_vars[frozenset({'perpetrator', 'table'})] >= 1
+        # for token_1, token_2 in self.true_facts:
+            # fact_key = frozenset({token_1, token_2})
+            # fact_var = self.fact_vars[fact_key]
+            # self.model += fact_var >= 1
     
     def _add_objective(self):
         """ Add optimization objective. """
@@ -258,6 +265,15 @@ class IlpCompression():
         return decision_vars, context_vars, fact_vars
         
 
+if __name__ == '__main__':
+    
+    import sc.schema
+    column = sc.schema.Column('testcolumn', 'testtype', [])
+    table = sc.schema.Table('testtable', [column])
+    schema = sc.schema.Schema([table], [], [])
+    compressor = IlpCompression(schema)
+    compressed = compressor.compress()
+    print(compressed)
 # Create the model
 # model = LpProblem(name="small-problem", sense=LpMinimize)
 #

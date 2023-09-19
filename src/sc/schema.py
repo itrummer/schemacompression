@@ -121,6 +121,12 @@ class Schema():
     
     def get_facts(self):
         """ Returns tuple with true facts and false facts. """
+        true_facts = []
+        false_facts = []
+        # Which elements are tables?
+        # Which elements are columns?
+        # Which columns belong to which tables?
+        # Which annotations belong to which tables?
         facts = []
         for table in self.tables:
             tbl_name = table.name
