@@ -11,11 +11,16 @@ from typing import List
 class Column():
     """ Represents a typed table column. """
     name: str
+    """ The column name. """
     type: str
+    """ The column data type. """
+    annotations: List[str]
+    """ All applicable column annotations. """
     
     def sql(self):
         """ DDL description of column with type. """
-        return f'{self.name}:{self.type}'
+        annotation_list = ' '.join(self.annotations)
+        return f'{self.name}:{annotation_list}'
 
 
 @dataclass
@@ -58,6 +63,74 @@ class Schema():
     pkeys: List[PrimaryKey]
     fkeys: List[ForeignKey]
     
+    def __init__(self, tables, pkeys, fkeys):
+        """ Initialize for given tables, primary, and foreign keys.
+        
+        Args:
+            tables: list of database tables.
+            pkeys: list of primary key constraints.
+            fkeys: list of foreign key constraints.
+        """
+        self.tables = tables
+        self.pkeys = []
+        self.fkeys = []
+        
+        print(pkeys)
+        for pkey in pkeys:
+            if len(pkey.columns) == 1:
+                tbl_name = pkey.table
+                col_name = pkey.columns[0]
+                self._add_annotation(tbl_name, col_name, 'primary key')
+            else:
+                self.pkeys.append(pkey)
+                        
+        for fkey in fkeys:
+            if len(fkey.from_columns) == 1:
+                from_tbl = fkey.from_table
+                from_col = fkey.from_columns[0]
+                to_tbl = fkey.to_table
+                to_col = fkey.to_columns[0]
+                annotation = f'foreign key references {to_tbl}({to_col})'
+                self._add_annotation(from_tbl, from_col, annotation)
+            else:
+                self.fkeys.append(fkey)
+    
+    def annotations(self):
+        """ Returns all annotations. """
+        tags = set()
+        for table in self.tables:
+            for column in table.columns:
+                tags.update(column.annotations)
+        
+        return list(tags)
+    
+    def columns(self):
+        """ Returns all columns. """
+        columns = []
+        for table in self.tables:
+            tbl_name = table.name
+            for column in table.columns:
+                col_name = column.name
+                full_name = f'{tbl_name}.{col_name}'
+                columns.append(full_name)
+        
+        return columns
+    
+    def facts(self):
+        """ Returns list of facts describing schema. """
+        facts = []
+        for table in self.tables:
+            tbl_name = table.name
+            facts += [(tbl_name, 'table')]
+            for column in table.columns:
+                col_name = column.name
+                facts += [(col_name, 'column')]
+                facts += [(col_name, tbl_name)]
+                for annotation in column.annotations:
+                    facts += [(col_name, annotation)]
+        
+        return facts
+    
     def sql(self):
         """ DDL commands for creating schema. 
         
@@ -66,9 +139,29 @@ class Schema():
         """
         return '\n'.join([t.sql() for t in self.tables])
     
+    def tables(self):
+        """ Returns all table names. """
+        return [t.name for t in self.tables]
+    
     def text(self):
         """ Returns text representation of schema. """
         return '\n'.join([t.text() for t in self.tables])
+
+    def _add_annotation(self, tbl_name, col_name, annotation):
+        """ Add column annotation.
+        
+        Args:
+            tbl_name: name of table containing column.
+            col_name: name of column to annotate.
+            annotation: add this annotation.
+        """
+        for table in self.tables:
+            if table.name == tbl_name:
+                for column in table.columns:
+                    if column.name == col_name:
+                        column.annotations.append(annotation)
+                        break
+                break
 
 
 def parse_spider(spider_db):
@@ -89,14 +182,14 @@ def parse_spider(spider_db):
     tables = [Table(name, []) for name in spider_tables]
     for (table_idx, col_name), col_type in zip(spider_columns, spider_types):
         if not col_name == '*':
-            column = Column(col_name, col_type)
+            column = Column(col_name, col_type, [col_type])
             table = tables[table_idx]
             table.columns.append(column)
     
     pkeys = []
     for table_name, col_idx in zip(spider_tables, spider_pkeys):
         col_name = spider_columns[col_idx][1]
-        pkey = PrimaryKey(table_name, col_name)
+        pkey = PrimaryKey(table_name, [col_name])
         pkeys.append(pkey)
     
     fkeys = []
