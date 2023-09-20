@@ -7,7 +7,7 @@ import argparse
 import json
 import logging
 import openai
-import sc.compress.ilp
+import sc.compress.gurobi
 import sc.compress.types
 import sc.compress.default_types
 import sc.llm
@@ -21,7 +21,7 @@ if __name__ == '__main__':
     parser.add_argument('aikey', type=str, help='API key of OpenAI')
     args = parser.parse_args()
     
-    logging.basicConfig(level=logging.DEBUG)
+    #logging.basicConfig(level=logging.DEBUG)
     openai.api_key = args.aikey
     model = 'gpt-3.5-turbo'
     with open(args.file) as file:
@@ -29,29 +29,31 @@ if __name__ == '__main__':
     
     raw_total = 0
     compressed_total = 0
-    for db_name, spider_db in spider.items():
-        schema = sc.schema.parse_spider(spider_db)
+    db_name = 'body_builder'
+    spider_db = spider[db_name]
+    # for db_name, spider_db in spider.items():
+    schema = sc.schema.parse_spider(spider_db)
 
-        raw_description = schema.text()
-        raw_size = sc.llm.nr_tokens(model, raw_description)
-        raw_total += raw_size
-        
-        #compressed_1 = sc.compress.types.compress_schema(schema)
-        compressed_2 = sc.compress.default_types.compress_schema(schema)
-        #compressed_1_size = sc.llm.nr_tokens(model, compressed_1)
-        compressed_2_size = sc.llm.nr_tokens(model, compressed_2)
-        
-        ilpCompression = sc.compress.ilp.IlpCompression(schema)
-        result = ilpCompression.compress()
-        print(result)
-        
-        print(f'Original\n{raw_description}')
-        print(f'Compressed\n{compressed_2}')
-        
-        #compressed_size = min(compressed_1_size, compressed_2_size)
-        compressed_size = compressed_2_size
-        compressed_total += compressed_size
-        break
+    raw_description = schema.text()
+    raw_size = sc.llm.nr_tokens(model, raw_description)
+    raw_total += raw_size
+    
+    #compressed_1 = sc.compress.types.compress_schema(schema)
+    compressed_2 = sc.compress.default_types.compress_schema(schema)
+    #compressed_1_size = sc.llm.nr_tokens(model, compressed_1)
+    compressed_2_size = sc.llm.nr_tokens(model, compressed_2)
+    
+    ilpCompression = sc.compress.gurobi.IlpCompression(schema)
+    result = ilpCompression.compress()
+    print(result)
+    
+    print(f'Original\n{raw_description}')
+    print(f'Compressed\n{compressed_2}')
+    
+    #compressed_size = min(compressed_1_size, compressed_2_size)
+    compressed_size = compressed_2_size
+    compressed_total += compressed_size
+        # break
         
         # if raw_size < compressed_size:
             # print(raw_description)

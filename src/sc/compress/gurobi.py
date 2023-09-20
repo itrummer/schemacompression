@@ -1,17 +1,21 @@
 '''
+Created on Sep 20, 2023
+
+@author: immanueltrummer
+'''
+'''
 Created on Sep 13, 2023
 
 @author: immanueltrummer
 '''
-from pulp import LpMinimize, LpMaximize, LpProblem, LpStatus, lpSum, LpVariable, get_solver
+import gurobipy as gp
 import logging
-import pulp
-
+from gurobipy import GRB
 
 class IlpCompression():
     """ Compresses schemata via integer linear programming. """
     
-    def __init__(self, schema, max_depth=3):
+    def __init__(self, schema, max_depth=1):
         """ Initializes for given schema. 
         
         Args:
@@ -34,7 +38,9 @@ class IlpCompression():
         logging.debug(f'Tokens: {self.tokens}')
         
         self.true_facts, self.false_facts = schema.get_facts()
-        self.max_length = 3 * len(self.true_facts)
+        self.max_length = 2*len(self.true_facts)
+        
+        self.model = gp.Model('Compression')
         self.decision_vars, self.context_vars, self.fact_vars = self._variables()
         
         logging.debug(f'True facts: {self.true_facts}')
@@ -44,7 +50,6 @@ class IlpCompression():
         # print(self.context_vars)
         # print(self.fact_vars)
         
-        self.model = LpProblem(name='Schema compression', sense=LpMinimize)
         self._add_constraints()
         self._add_objective()
         # print(self.model)
@@ -55,35 +60,30 @@ class IlpCompression():
         Returns:
             Compressed representation of schema.
         """
-        #solver = pulp.GLPK('/opt/homebrew/bin/glpsol', timeLimit=300)
-        #solver = pulp.GUROBI('/Library/gurobi1003/macos_universal2/bin')
-        #solver = pulp.getSolver('GUROBI_CMD', path='/Library/gurobi1003/macos_universal2/bin')
-        # solver = get_solver('GLPK_CMD', path='/opt/homebrew/bin/glpsol', maxSeconds=10)
-        solver = pulp.GUROBI_CMD(path='/Library/gurobi1003/macos_universal2/bin')
-        self.model.solve(solver)
+        self.model.optimize()
         # Extract solution
         parts = []
         for pos in range(self.max_length):
             for token in self.ids:
-                if self.decision_vars[pos][token].value() >= 0.5:
+                if self.decision_vars[pos][token].X >= 0.5:
                     parts += [token]
             
             for token in ['(', ')', ',']:
-                if self.decision_vars[pos][token].value() >= 0.5:
+                if self.decision_vars[pos][token].X >= 0.5:
                     parts += [token]
         
-        for pos in range(self.max_length):
-            for token in self.tokens:
-                decision_var = self.decision_vars[pos][token]
-                print(f'{decision_var.name} = {decision_var.varValue}')
-                
-        for fact_var in self.fact_vars.values():
-            print(f'{fact_var.name} = {fact_var.varValue}')
-            
-        for pos in range(self.max_length):
-            for depth in range(self.max_depth):
-                for context_var in self.context_vars[pos][depth].values():
-                    print(f'{context_var.name} = {context_var.varValue}')
+        # for pos in range(self.max_length):
+            # for token in self.tokens:
+                # decision_var = self.decision_vars[pos][token]
+                # print(f'{decision_var.name} = {decision_var.varValue}')
+                #
+        # for fact_var in self.fact_vars.values():
+            # print(f'{fact_var.name} = {fact_var.varValue}')
+            #
+        # for pos in range(self.max_length):
+            # for depth in range(self.max_depth):
+                # for context_var in self.context_vars[pos][depth].values():
+                    # print(f'{context_var.name} = {context_var.varValue}')
         
         return ''.join(parts)
 
@@ -94,31 +94,29 @@ class IlpCompression():
             opening = self.decision_vars[pos]['(']
             closing = self.decision_vars[pos][')']
             comma = self.decision_vars[pos][',']
-            self.model += opening + closing + comma <= 1
+            self.model.addConstr(opening + closing + comma <= 1)
         
         # Introduce auxiliary variables representing emptiness
         is_empties = []
         for pos in range(self.max_length):
             name = f'P{pos}_empty'
-            is_empty = LpVariable(
-                name=name, lowBound=0, 
-                upBound=1, cat='Integer')
+            is_empty = self.model.addVar(vtype=GRB.BINARY, name=name)
             is_empties.append(is_empty)
 
         # Ensure correct value for auxiliary variables
         for pos in range(self.max_length):
             is_empty = is_empties[pos]
             token_vars = [self.decision_vars[pos][t] for t in self.tokens]
-            self.model += is_empty >= 1 - lpSum(token_vars)
+            self.model.addConstr(is_empty >= 1 - gp.quicksum(token_vars))
             for token_var in token_vars:
-                self.model += is_empty <= 1 - token_var
+                self.model.addConstr(is_empty <= 1 - token_var)
         
         # Can only have empty slots at the end of description
         for pos_1 in range(self.max_length-1):
             pos_2 = pos_1 + 1
             empty_1 = is_empties[pos_1]
             empty_2 = is_empties[pos_2]
-            self.model += empty_1 <= empty_2
+            self.model.addConstr(empty_1 <= empty_2)
         
         # Must separate consecutive tokens
         for pos_1 in range(self.max_length-1):
@@ -126,30 +124,31 @@ class IlpCompression():
             token_vars_1 = [self.decision_vars[pos_1][t] for t in self.ids]
             token_vars_2 = [self.decision_vars[pos_2][t] for t in self.ids]
             specials_1 = [self.decision_vars[pos_1][t] for t in ['(', ')', ',']]
-            self.model += lpSum(token_vars_1) + lpSum(token_vars_2) \
-                - lpSum(specials_1) <= 1
+            self.model.addConstr(
+                gp.quicksum(token_vars_1) + gp.quicksum(token_vars_2) \
+                - gp.quicksum(specials_1) <= 1)
             
         # Select at most one ID token per position
         for pos in range(self.max_length):
             token_vars = [self.decision_vars[pos][token] for token in self.ids]
-            self.model += lpSum(token_vars) <= 1
+            self.model.addConstr(gp.quicksum(token_vars) <= 1)
         
         # Must connect opening parenthesis with token
         for pos in range(self.max_length):
             opening = self.decision_vars[pos]['(']
             token_vars = [self.decision_vars[pos][token] for token in self.ids]
-            self.model += opening <= lpSum(token_vars)
+            self.model.addConstr(opening <= gp.quicksum(token_vars))
             
         # Balance opening and closing parentheses
         opening = [decisions['('] for decisions in self.decision_vars]
         closing = [decisions[')'] for decisions in self.decision_vars]
-        self.model += lpSum(opening) == lpSum(closing)
+        self.model.addConstr(gp.quicksum(opening) == gp.quicksum(closing))
         
         # Never more closing than opening parenthesis!
         for pos in range(self.max_length):
             opening = [ds['('] for ds in self.decision_vars[:pos+1]]
             closing = [ds[')'] for ds in self.decision_vars[:pos+1]]
-            self.model += lpSum(opening) >= lpSum(closing)
+            self.model.addConstr(gp.quicksum(opening) >= gp.quicksum(closing))
         
         # Do not select tokens already in context (required for correctness!)
         # Otherwise: selects any token in context after re-activating token.
@@ -160,21 +159,21 @@ class IlpCompression():
                     context_var = self.context_vars[pos][depth][token]
                     context_vars.append(context_var)
                 decision_var = self.decision_vars[pos][token]
-                self.model += lpSum(context_vars) + decision_var <= 1
+                self.model.addConstr(gp.quicksum(context_vars) + decision_var <= 1)
             
         # Each context layer fixes at most one token
         for pos in range(self.max_length):
             for depth in range(self.max_depth):
-                self.model += lpSum(
-                    self.context_vars[pos][depth].values()) <= 1
+                self.model.addConstr(
+                    gp.quicksum(self.context_vars[pos][depth].values()) <= 1)
                     
         # Context layers are used consecutively
         for pos in range(self.max_length):
             for depth_1 in range(self.max_depth-1):
                 depth_2 = depth_1 + 1
-                sum_1 = lpSum(self.context_vars[pos][depth_1].values())
-                sum_2 = lpSum(self.context_vars[pos][depth_2].values())
-                self.model += sum_1 >= sum_2
+                sum_1 = gp.quicksum(self.context_vars[pos][depth_1].values())
+                sum_2 = gp.quicksum(self.context_vars[pos][depth_2].values())
+                self.model.addConstr(sum_1 >= sum_2)
         
         # Collect all context variables per position
         context_by_pos = []
@@ -185,16 +184,16 @@ class IlpCompression():
             context_by_pos.append(pos_vars)
         
         # Initial context is empty
-        self.model += lpSum(context_by_pos[0]) == 0
+        self.model.addConstr(gp.quicksum(context_by_pos[0]) == 0)
         
         # Ensure correct number of context tokens
         for pos_1 in range(self.max_length-1):
             pos_2 = pos_1 + 1
-            sum_1 = lpSum(context_by_pos[pos_1])
-            sum_2 = lpSum(context_by_pos[pos_2])
+            sum_1 = gp.quicksum(context_by_pos[pos_1])
+            sum_2 = gp.quicksum(context_by_pos[pos_2])
             opening = self.decision_vars[pos_1]['(']
             closing = self.decision_vars[pos_1][')']
-            self.model += sum_1 + opening - closing == sum_2
+            self.model.addConstr(sum_1 + opening - closing == sum_2)
         
         # Create activation variables
         activations = []
@@ -204,12 +203,10 @@ class IlpCompression():
             for token in self.ids:
                 token_var = self.decision_vars[pos][token]
                 name = f'Activate_P{pos}_{token}'
-                activation = LpVariable(
-                    name=name, lowBound=0, 
-                    upBound=1, cat='Integer')
-                self.model += activation <= opening
-                self.model += activation <= token_var
-                self.model += activation >= opening + token_var - 1
+                activation = self.model.addVar(vtype=GRB.BINARY, name=name)
+                self.model.addConstr(activation <= opening)
+                self.model.addConstr(activation <= token_var)
+                self.model.addConstr(activation >= opening + token_var - 1)
                 cur_activations[token] = activation
             activations.append(cur_activations)
         
@@ -221,7 +218,7 @@ class IlpCompression():
                 token_vars = [
                     self.context_vars[pos_2][d][token]
                     for d in range(self.max_depth)]
-                self.model += lpSum(token_vars) >= activation_var
+                self.model.addConstr(gp.quicksum(token_vars) >= activation_var)
         
         # Restrict context changes, compared to prior context
         for pos_1 in range(self.max_length-1):
@@ -232,8 +229,8 @@ class IlpCompression():
                 for token in self.ids:
                     var_1 = self.context_vars[pos_1][depth][token]
                     var_2 = self.context_vars[pos_2][depth][token]
-                    self.model += var_2 >= var_1 - closing
-                    self.model += var_2 <= var_1 + opening
+                    self.model.addConstr(var_2 >= var_1 - closing)
+                    self.model.addConstr(var_2 <= var_1 + opening)
         
         def get_mention_var(outer_token, inner_token, pos, depth):
             """ Generate variable representing fact mention.
@@ -247,11 +244,10 @@ class IlpCompression():
             outer_var = self.context_vars[pos][depth][outer_token]
             inner_var = self.decision_vars[pos][inner_token]
             name = f'Mention_P{pos}_D{depth}_{outer_token}_{inner_token}'
-            mention_var = LpVariable(
-                name=name, lowBound=0, upBound=1, cat='Integer')
-            self.model += mention_var <= outer_var
-            self.model += mention_var <= inner_var
-            self.model += mention_var >= -1 + outer_var + inner_var
+            mention_var = self.model.addVar(vtype=GRB.BINARY, name=name)
+            self.model.addConstr(mention_var <= outer_var)
+            self.model.addConstr(mention_var <= inner_var)
+            self.model.addConstr(mention_var >= -1 + outer_var + inner_var)
             return mention_var
 
         # Link facts to nested tokens
@@ -270,21 +266,21 @@ class IlpCompression():
                             
                     fact_key = frozenset({token_1, token_2})
                     fact_var = self.fact_vars[fact_key]
-                    self.model += fact_var <= lpSum(mention_vars)
+                    self.model.addConstr(fact_var <= gp.quicksum(mention_vars))
                     for mention_var in mention_vars:
-                        self.model += fact_var >= mention_var
+                        self.model.addConstr(fact_var >= mention_var)
         
         # Make sure that true facts are mentioned
         for token_1, token_2 in self.true_facts:
             fact_key = frozenset({token_1, token_2})
             fact_var = self.fact_vars[fact_key]
-            self.model += fact_var >= 1
+            self.model.addConstr(fact_var >= 1)
         
         # Ensure that wrong facts are not mentioned
         for token_1, token_2 in self.false_facts:
             fact_key = frozenset({token_1, token_2})
             fact_var = self.fact_vars[fact_key]
-            self.model += fact_var <= 0
+            self.model.addConstr(fact_var <= 0)
 
     def _add_objective(self):
         """ Add optimization objective. """
@@ -293,7 +289,7 @@ class IlpCompression():
             for token in self.tokens:
                 token_var = self.decision_vars[pos][token]
                 token_vars.append(token_var)
-        self.model += lpSum(token_vars)
+        self.model.setObjective(gp.quicksum(token_vars), GRB.MINIMIZE)
     
     def _variables(self):
         """ Returns variables for input schema. 
@@ -307,9 +303,7 @@ class IlpCompression():
             cur_pos_vars = {}
             for token in self.tokens:
                 name = f'P{pos}_{token}'
-                decision_var = LpVariable(
-                    name=name, lowBound=0, 
-                    upBound=1, cat='Integer')
+                decision_var = self.model.addVar(vtype=GRB.BINARY, name=name)
                 cur_pos_vars[token] = decision_var
             decision_vars.append(cur_pos_vars)
         
@@ -323,9 +317,8 @@ class IlpCompression():
                 cur_pos_vars.append(cur_depth_vars)
                 for context_id in self.ids:
                     name = f'P{pos}_D{depth}_{context_id}'
-                    context_var = LpVariable(
-                        name=name, lowBound=0,
-                        upBound=1, cat='Integer')
+                    context_var = self.model.addVar(
+                        vtype=GRB.BINARY, name=name)
                     cur_depth_vars[context_id] = context_var
         
         # Access by fact_vars[frozenset([id_1, id_2])]
@@ -334,9 +327,8 @@ class IlpCompression():
             for id_2 in self.ids:
                 if id_1 < id_2:
                     fact_name = f'{id_1}_{id_2}'
-                    fact_var = LpVariable(
-                        name=fact_name, lowBound=0, 
-                        upBound=1, cat='Integer')
+                    fact_var = self.model.addVar(
+                        vtype=GRB.BINARY, name=fact_name)
                     ids = frozenset({id_1, id_2})
                     fact_vars[ids] = fact_var
         
