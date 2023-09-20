@@ -3,6 +3,7 @@ Created on Sep 7, 2023
 
 @author: immanueltrummer
 '''
+from collections import Counter
 from dataclasses import dataclass
 from typing import List
 
@@ -56,12 +57,8 @@ class ForeignKey():
     to_columns: List[str]
 
 
-#@dataclass
 class Schema():
     """ A schema is defined by tables and constraints. """
-    # tables: List[Table]
-    # pkeys: List[PrimaryKey]
-    # fkeys: List[ForeignKey]
     
     def __init__(self, tables, pkeys, fkeys):
         """ Initialize for given tables, primary, and foreign keys.
@@ -75,7 +72,12 @@ class Schema():
         self.pkeys = []
         self.fkeys = []
         
-        print(pkeys)
+        self.column_count = Counter()
+        for table in self.tables:
+            for column in table.columns:
+                col_name = column.name
+                self.column_count.update([col_name])
+        
         for pkey in pkeys:
             if len(pkey.columns) == 1:
                 tbl_name = pkey.table
@@ -106,39 +108,66 @@ class Schema():
     
     def get_columns(self):
         """ Returns all columns. """
-        columns = set()
+        columns = []
         for table in self.tables:
             for column in table.columns:
-                col_name = column.name
-                if col_name in columns:
-                    tbl_name = table.name
-                    full_name = f'{tbl_name}.{col_name}'
-                    columns.add(full_name)
-                else:
-                    columns.add(col_name)
+                full_name = self._full_name(table, column)
+                columns.append(full_name)
         
-        return list(columns)
+        return columns
     
     def get_facts(self):
         """ Returns tuple with true facts and false facts. """
         true_facts = []
         false_facts = []
-        # Which elements are tables?
-        # Which elements are columns?
-        # Which columns belong to which tables?
-        # Which annotations belong to which tables?
-        facts = []
-        for table in self.tables:
-            tbl_name = table.name
-            facts += [(tbl_name, 'table')]
-            for column in table.columns:
-                col_name = column.name
-                facts += [(col_name, 'column')]
-                facts += [(col_name, tbl_name)]
-                for annotation in column.annotations:
-                    facts += [(col_name, annotation)]
         
-        return facts, []
+        # Which elements are tables?
+        for table in self.get_tables():
+            true_fact = (table, 'table')
+            false_fact = (table, 'column')
+            true_facts.append(true_fact)
+            false_facts.append(false_fact)
+
+        # Which elements are columns?
+        for column in self.get_columns():
+            true_fact = (column, 'column')
+            false_fact = (column, 'table')
+            true_facts.append(true_fact)
+            false_facts.append(false_fact)
+
+        # Which columns belong to which tables?
+        for table in self.tables:
+            for column in table.columns:
+                col_name = self._full_name(table, column)
+                for tbl_name in self.get_tables():
+                    if tbl_name == table.name:
+                        true_fact = (tbl_name, col_name)
+                        true_facts.append(true_fact)
+                    else:
+                        false_fact = (tbl_name, col_name)
+                        false_facts.append(false_fact)
+        
+        # Which annotations belong to which tables?
+        for annotation in self.get_annotations():
+            for table in self.tables:
+                for column in table.columns:
+                    col_name = self._full_name(table, column)
+                    if annotation in column.annotations:
+                        true_fact = (col_name, annotation)
+                        true_facts.append(true_fact)
+                    else:
+                        false_fact = (col_name, annotation)
+                        false_facts.append(false_fact)
+
+        # Tables are no columns and vice-versa
+        false_facts.append(('table', 'column'))
+        # Tables have no annotations
+        for annotation in self.get_annotations():
+            false_facts.append((annotation, 'table'))
+            for table in self.get_tables():
+                false_facts.append((table, annotation))
+
+        return true_facts, false_facts
     
     def sql(self):
         """ DDL commands for creating schema. 
@@ -171,6 +200,34 @@ class Schema():
                         column.annotations.append(annotation)
                         break
                 break
+    
+    def _full_name(self, table, column):
+        """ Returns fully qualified column name.
+        
+        Args:
+            table: column belongs to this table.
+            column: return name for this column.
+        
+        Returns:
+            column with added table name (if ambiguous).
+        """
+        col_name = column.name
+        if self._is_ambiguous(col_name):
+            tbl_name = table.name
+            return f'{tbl_name}.{col_name}'
+        else:
+            return col_name
+    
+    def _is_ambiguous(self, col_name):
+        """ Checks if column name is ambiguous.
+        
+        Args:
+            col_name: name of column to test.
+        
+        Returns:
+            True if the column appears in multiple tables.
+        """
+        return (self.column_count[col_name] > 1)
 
 
 def parse_spider(spider_db):
