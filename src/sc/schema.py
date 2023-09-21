@@ -107,7 +107,7 @@ class Schema():
         return list(tags)
     
     def get_columns(self):
-        """ Returns all columns. """
+        """ Returns all column names as list. """
         columns = []
         for table in self.tables:
             for column in table.columns:
@@ -121,33 +121,20 @@ class Schema():
         true_facts = []
         false_facts = []
         
-        # Which elements are tables?
-        for table in self.get_tables():
-            true_fact = (table, 'table')
-            false_fact = (table, 'column')
-            true_facts.append(true_fact)
-            false_facts.append(false_fact)
-
-        # Which elements are columns?
-        for column in self.get_columns():
-            true_fact = (column, 'column')
-            false_fact = (column, 'table')
-            true_facts.append(true_fact)
-            false_facts.append(false_fact)
-
         # Which columns belong to which tables?
         for table in self.tables:
             for column in table.columns:
                 col_name = self._full_name(table, column)
                 for tbl_name in self.get_tables():
+                    predicate = f'table {tbl_name} column'
                     if tbl_name == table.name:
-                        true_fact = (tbl_name, col_name)
+                        true_fact = (predicate, col_name)
                         true_facts.append(true_fact)
                     else:
-                        false_fact = (tbl_name, col_name)
+                        false_fact = (predicate, col_name)
                         false_facts.append(false_fact)
         
-        # Which annotations belong to which tables?
+        # Which annotations belong to which columns?
         for annotation in self.get_annotations():
             for table in self.tables:
                 for column in table.columns:
@@ -159,16 +146,47 @@ class Schema():
                         false_fact = (col_name, annotation)
                         false_facts.append(false_fact)
 
-        # Tables are no columns and vice-versa
-        false_facts.append(('table', 'column'))
         # Tables have no annotations
-        for annotation in self.get_annotations():
-            false_facts.append((annotation, 'table'))
-            for table in self.get_tables():
-                false_facts.append((table, annotation))
+        # for annotation in self.get_annotations():
+            # false_facts.append((annotation, 'table'))
+            # for table in self.get_tables():
+                # false_facts.append((table, annotation))
 
         return true_facts, false_facts
     
+    def get_identifiers(self):
+        """ Retrieve all identifiers that appear in facts. 
+        
+        Returns:
+            list of identifiers.
+        """
+        true_facts, false_facts = self.get_facts()
+        facts = true_facts + false_facts
+        identifiers = set()
+        for id_1, id_2 in facts:
+            identifiers.add(id_1)
+            identifiers.add(id_2)
+        return list(identifiers)
+    
+    def get_tables(self):
+        """ Returns all table names as list. """
+        return [t.name for t in self.tables]
+
+    def split(self):
+        """ Splits schema into multiple parts. 
+        
+        Returns:
+            list of component schemata.
+        """
+        assert not self.pkeys, 'Cannot split with explicit primary keys!'
+        assert not self.fkeys, 'Cannot split with explicit foreign keys!'
+        schemas = []
+        for table in self.tables:
+            schema = Schema([table], [], [])
+            schemas.append(schema)
+        
+        return schemas
+
     def sql(self):
         """ DDL commands for creating schema. 
         
@@ -176,10 +194,6 @@ class Schema():
             a string consisting of DDL commands.
         """
         return '\n'.join([t.sql() for t in self.tables])
-    
-    def get_tables(self):
-        """ Returns all table names. """
-        return [t.name for t in self.tables]
     
     def text(self):
         """ Returns text representation of schema. """

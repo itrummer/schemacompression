@@ -8,6 +8,7 @@ Created on Sep 13, 2023
 
 @author: immanueltrummer
 '''
+import collections
 import gurobipy as gp
 import logging
 import sc.llm
@@ -16,7 +17,7 @@ from gurobipy import GRB
 class IlpCompression():
     """ Compresses schemata via integer linear programming. """
     
-    def __init__(self, schema, max_depth=1, llm_name='gpt-3.5-turbo'):
+    def __init__(self, schema, max_depth=2, llm_name='gpt-3.5-turbo'):
         """ Initializes for given schema. 
         
         Args:
@@ -27,35 +28,26 @@ class IlpCompression():
         self.schema = schema
         self.max_depth = max_depth
         self.llm_name = llm_name
-        self.tables = schema.get_tables()
-        self.columns = schema.get_columns()
-        self.annotations = schema.get_annotations()
-        self.ids = self.tables + self.columns + \
-            self.annotations + ['table', 'column']
+        self.ids = schema.get_identifiers()
         self.tokens = self.ids + ['(', ')', ',']
         
-        logging.debug(f'Tables: {self.tables}')
-        logging.debug(f'Columns: {self.columns}')
-        logging.debug(f'Annotations: {self.annotations}')
         logging.debug(f'IDs: {self.ids}')
         logging.debug(f'Tokens: {self.tokens}')
         
         self.true_facts, self.false_facts = schema.get_facts()
+        self.facts = self.true_facts + self.false_facts
+        self.context_ids = self._get_context_ids()
         self.max_length = 2*len(self.true_facts)
         
         self.model = gp.Model('Compression')
+        self.model.Params.TimeLimit = 6*60
         self.decision_vars, self.context_vars, self.fact_vars = self._variables()
         
         logging.debug(f'True facts: {self.true_facts}')
         logging.debug(f'False facts: {self.false_facts}')
         
-        # print(self.decision_vars)
-        # print(self.context_vars)
-        # print(self.fact_vars)
-        
         self._add_constraints()
         self._add_objective()
-        # print(self.model)
 
     def compress(self):
         """ Solve compression problem and return solution.
@@ -75,19 +67,6 @@ class IlpCompression():
                 if self.decision_vars[pos][token].X >= 0.5:
                     parts += [token]
         
-        # for pos in range(self.max_length):
-            # for token in self.tokens:
-                # decision_var = self.decision_vars[pos][token]
-                # print(f'{decision_var.name} = {decision_var.varValue}')
-                #
-        # for fact_var in self.fact_vars.values():
-            # print(f'{fact_var.name} = {fact_var.varValue}')
-            #
-        # for pos in range(self.max_length):
-            # for depth in range(self.max_depth):
-                # for context_var in self.context_vars[pos][depth].values():
-                    # print(f'{context_var.name} = {context_var.varValue}')
-        
         return ''.join(parts)
 
     def _add_constraints(self):
@@ -106,7 +85,7 @@ class IlpCompression():
             is_empty = self.model.addVar(vtype=GRB.BINARY, name=name)
             is_empties.append(is_empty)
 
-        # Ensure correct value for auxiliary variables
+        # Ensure correct value for emptiness variables
         for pos in range(self.max_length):
             is_empty = is_empties[pos]
             token_vars = [self.decision_vars[pos][t] for t in self.tokens]
@@ -254,36 +233,36 @@ class IlpCompression():
             return mention_var
 
         # Link facts to nested tokens
-        for token_1 in self.ids:
-            for token_2 in self.ids:
-                if token_1 < token_2:
-                    # Sum over possible mentions
-                    mention_vars = []
-                    for pos in range(self.max_length):
-                        for depth in range(self.max_depth):
-                            mention_var_1 = get_mention_var(
-                                token_1, token_2, pos, depth)
-                            mention_var_2 = get_mention_var(
-                                token_2, token_1, pos, depth)
-                            mention_vars += [mention_var_1, mention_var_2]
-                            
-                    fact_key = frozenset({token_1, token_2})
-                    fact_var = self.fact_vars[fact_key]
-                    self.model.addConstr(fact_var <= gp.quicksum(mention_vars))
-                    for mention_var in mention_vars:
-                        self.model.addConstr(fact_var >= mention_var)
+        for fact_key in self.fact_vars.keys():
+            token_1 = min(fact_key)
+            token_2 = max(fact_key)
+            # Sum over possible mentions
+            mention_vars = []
+            for pos in range(self.max_length):
+                for depth in range(self.max_depth):
+                    mention_var_1 = get_mention_var(
+                        token_1, token_2, pos, depth)
+                    mention_var_2 = get_mention_var(
+                        token_2, token_1, pos, depth)
+                    mention_vars += [mention_var_1, mention_var_2]
+                    
+            fact_key = frozenset({token_1, token_2})
+            fact_var = self.fact_vars[fact_key]
+            self.model.addConstr(fact_var <= gp.quicksum(mention_vars))
+            for mention_var in mention_vars:
+                self.model.addConstr(fact_var >= mention_var)
         
         # Make sure that true facts are mentioned
         for token_1, token_2 in self.true_facts:
             fact_key = frozenset({token_1, token_2})
             fact_var = self.fact_vars[fact_key]
-            self.model.addConstr(fact_var >= 1)
+            self.model.addConstr(fact_var == 1)
         
         # Ensure that wrong facts are not mentioned
         for token_1, token_2 in self.false_facts:
             fact_key = frozenset({token_1, token_2})
             fact_var = self.fact_vars[fact_key]
-            self.model.addConstr(fact_var <= 0)
+            self.model.addConstr(fact_var == 0)
 
     def _add_objective(self):
         """ Add optimization objective. """
@@ -294,6 +273,22 @@ class IlpCompression():
                 weight = sc.llm.nr_tokens(self.llm_name, token)
                 token_vars.append(weight * token_var)
         self.model.setObjective(gp.quicksum(token_vars), GRB.MINIMIZE)
+    
+    def _get_context_ids(self, k=5):
+        """ Heuristically select most useful identifiers for context. 
+        
+        Args:
+            k: select at most that many identifiers.
+        
+        Returns:
+            list of relevant identifiers.
+        """
+        counter = collections.Counter()
+        for id_1, id_2 in self.facts:
+            counter.update([id_1, id_2])
+        common_counts = counter.most_common(k)
+        common_ids = [ic[0] for ic in common_counts]
+        return common_ids
     
     def _variables(self):
         """ Returns variables for input schema. 
@@ -326,15 +321,16 @@ class IlpCompression():
                     cur_depth_vars[context_id] = context_var
         
         # Access by fact_vars[frozenset([id_1, id_2])]
+        fact_keys = set([frozenset([id_1, id_2]) for id_1, id_2 in self.facts])
         fact_vars = {}
-        for id_1 in self.ids:
-            for id_2 in self.ids:
-                if id_1 < id_2:
-                    fact_name = f'{id_1}_{id_2}'
-                    fact_var = self.model.addVar(
-                        vtype=GRB.BINARY, name=fact_name)
-                    ids = frozenset({id_1, id_2})
-                    fact_vars[ids] = fact_var
+        for fact_key in fact_keys:
+            id_1 = min(fact_key)
+            id_2 = max(fact_key)
+            fact_name = f'{id_1}_{id_2}'
+            fact_var = self.model.addVar(
+                vtype=GRB.BINARY, name=fact_name)
+            ids = frozenset({id_1, id_2})
+            fact_vars[ids] = fact_var
         
         logging.debug(f'Fact variable keys: {fact_vars.keys()}')
         return decision_vars, context_vars, fact_vars
