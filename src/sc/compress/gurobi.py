@@ -10,20 +10,23 @@ Created on Sep 13, 2023
 '''
 import gurobipy as gp
 import logging
+import sc.llm
 from gurobipy import GRB
 
 class IlpCompression():
     """ Compresses schemata via integer linear programming. """
     
-    def __init__(self, schema, max_depth=1):
+    def __init__(self, schema, max_depth=1, llm_name='gpt-3.5-turbo'):
         """ Initializes for given schema. 
         
         Args:
             schema: a schema to compress.
             max_depth: maximal context depth.
+            llm_name: name of LLM to use.
         """
         self.schema = schema
         self.max_depth = max_depth
+        self.llm_name = llm_name
         self.tables = schema.get_tables()
         self.columns = schema.get_columns()
         self.annotations = schema.get_annotations()
@@ -288,7 +291,8 @@ class IlpCompression():
         for pos in range(self.max_length):
             for token in self.tokens:
                 token_var = self.decision_vars[pos][token]
-                token_vars.append(token_var)
+                weight = sc.llm.nr_tokens(self.llm_name, token)
+                token_vars.append(weight * token_var)
         self.model.setObjective(gp.quicksum(token_vars), GRB.MINIMIZE)
     
     def _variables(self):
