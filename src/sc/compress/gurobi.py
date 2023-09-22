@@ -18,7 +18,7 @@ class IlpCompression():
     """ Compresses schemata via integer linear programming. """
     
     def __init__(
-            self, schema, max_depth=2, 
+            self, schema, max_depth=1, 
             llm_name='gpt-3.5-turbo', neglect_comma=False):
         """ Initializes for given schema. 
         
@@ -44,7 +44,7 @@ class IlpCompression():
         self.max_length = round(1.5*len(self.true_facts))
         
         self.model = gp.Model('Compression')
-        self.model.Params.TimeLimit = 10*60
+        self.model.Params.TimeLimit = 3*60
         self.decision_vars, self.context_vars, self.fact_vars = self._variables()
         
         logging.debug(f'True facts: {self.true_facts}')
@@ -52,6 +52,7 @@ class IlpCompression():
         
         self._add_constraints()
         self._add_objective()
+        print(self.model)
 
     def compress(self):
         """ Solve compression problem and return solution.
@@ -75,19 +76,20 @@ class IlpCompression():
 
     def _add_constraints(self):
         """ Adds constraints to internal model. """
-        # Cannot have both: opening and closing parentheses!
-        for pos in range(self.max_length):
-            opening = self.decision_vars[pos]['(']
-            closing = self.decision_vars[pos][')']
-            comma = self.decision_vars[pos][',']
-            self.model.addConstr(opening + closing + comma <= 1)
-        
         # Introduce auxiliary variables representing emptiness
         is_empties = []
         for pos in range(self.max_length):
             name = f'P{pos}_empty'
             is_empty = self.model.addVar(vtype=GRB.BINARY, name=name)
             is_empties.append(is_empty)
+        
+        # Finish with parenthesis or delimiter or empty!
+        for pos in range(self.max_length):
+            opening = self.decision_vars[pos]['(']
+            closing = self.decision_vars[pos][')']
+            comma = self.decision_vars[pos][',']
+            empty = is_empties[pos]
+            self.model.addConstr(opening + closing + comma + empty == 1)
 
         # Ensure correct value for emptiness variables
         for pos in range(self.max_length):
