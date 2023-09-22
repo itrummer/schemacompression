@@ -21,7 +21,7 @@ class Column():
     def sql(self):
         """ DDL description of column with type. """
         annotation_list = ' '.join(self.annotations)
-        return f'{self.name}:{annotation_list}'
+        return f'{self.name} {annotation_list}'
 
 
 @dataclass

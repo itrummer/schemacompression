@@ -19,32 +19,34 @@ class IlpCompression():
     
     def __init__(
             self, schema, max_depth=1, 
-            llm_name='gpt-3.5-turbo', neglect_comma=False):
+            llm_name='gpt-3.5-turbo',
+            upper_bound=None, top_k=5):
         """ Initializes for given schema. 
         
         Args:
             schema: a schema to compress.
             max_depth: maximal context depth.
             llm_name: name of LLM to use.
-            neglect_comma: do not count comma in cost function.
+            upper_bound: upper bound on cost.
+            top_k: consider k most frequent tokens for context.
         """
         self.schema = schema
         self.max_depth = max_depth
         self.llm_name = llm_name
-        self.neglect_comma = neglect_comma
+        self.upper_bound = upper_bound
         self.ids = schema.get_identifiers()
-        self.tokens = self.ids + ['(', ')', ',']
+        self.tokens = self.ids + ['(', ')']
         
         logging.debug(f'IDs: {self.ids}')
         logging.debug(f'Tokens: {self.tokens}')
         
         self.true_facts, self.false_facts = schema.get_facts()
         self.facts = self.true_facts + self.false_facts
-        self.context_ids = self._get_context_ids()
+        self.context_ids = self._get_context_ids(top_k)
         self.max_length = round(1.5*len(self.true_facts))
         
         self.model = gp.Model('Compression')
-        self.model.Params.TimeLimit = 3*60
+        self.model.Params.TimeLimit = 5*60
         self.decision_vars, self.context_vars, self.fact_vars = self._variables()
         
         logging.debug(f'True facts: {self.true_facts}')
@@ -68,11 +70,21 @@ class IlpCompression():
                 if self.decision_vars[pos][token].X >= 0.5:
                     parts += [token]
             
-            for token in ['(', ')', ',']:
+            nr_separators = 0
+            for token in ['(', ')']:
                 if self.decision_vars[pos][token].X >= 0.5:
                     parts += [token]
+                    nr_separators += 1
+            
+            if nr_separators == 0:
+                parts += [' ']
         
-        return ''.join(parts)
+        joined = ''.join(parts)
+        
+        # Remove spaces before closing parenthesis
+        polished = joined.replace(' )', ')')
+
+        return polished
 
     def _add_constraints(self):
         """ Adds constraints to internal model. """
@@ -83,13 +95,12 @@ class IlpCompression():
             is_empty = self.model.addVar(vtype=GRB.BINARY, name=name)
             is_empties.append(is_empty)
         
-        # Finish with parenthesis or delimiter or empty!
+        # Cannot have opening and closing parentheses and empty!
         for pos in range(self.max_length):
             opening = self.decision_vars[pos]['(']
             closing = self.decision_vars[pos][')']
-            comma = self.decision_vars[pos][',']
             empty = is_empties[pos]
-            self.model.addConstr(opening + closing + comma + empty == 1)
+            self.model.addConstr(opening + closing + empty <= 1)
 
         # Ensure correct value for emptiness variables
         for pos in range(self.max_length):
@@ -107,14 +118,14 @@ class IlpCompression():
             self.model.addConstr(empty_1 <= empty_2)
         
         # Must separate consecutive tokens
-        for pos_1 in range(self.max_length-1):
-            pos_2 = pos_1 + 1
-            token_vars_1 = [self.decision_vars[pos_1][t] for t in self.ids]
-            token_vars_2 = [self.decision_vars[pos_2][t] for t in self.ids]
-            specials_1 = [self.decision_vars[pos_1][t] for t in ['(', ')', ',']]
-            self.model.addConstr(
-                gp.quicksum(token_vars_1) + gp.quicksum(token_vars_2) \
-                - gp.quicksum(specials_1) <= 1)
+        # for pos_1 in range(self.max_length-1):
+            # pos_2 = pos_1 + 1
+            # token_vars_1 = [self.decision_vars[pos_1][t] for t in self.ids]
+            # token_vars_2 = [self.decision_vars[pos_2][t] for t in self.ids]
+            # specials_1 = [self.decision_vars[pos_1][t] for t in ['(', ')', ',']]
+            # self.model.addConstr(
+                # gp.quicksum(token_vars_1) + gp.quicksum(token_vars_2) \
+                # - gp.quicksum(specials_1) <= 1)
             
         # Select at most one ID token per position
         for pos in range(self.max_length):
@@ -267,33 +278,43 @@ class IlpCompression():
             fact_key = frozenset({token_1, token_2})
             fact_var = self.fact_vars[fact_key]
             self.model.addConstr(fact_var == 0)
+        
+        # Heuristically prune context with depth > 1
+        for depth in range(1, self.max_depth):
+            for token in self.ids:
+                if token not in self.context_ids:
+                    for pos in range(self.max_length):
+                        context_var = self.context_vars[pos][depth][token]
+                        self.model.addConstr(context_var == 0)
 
     def _add_objective(self):
         """ Add optimization objective. """
         token_vars = []
         for pos in range(self.max_length):
             for token in self.tokens:
-                if token == ',' and self.neglect_comma:
-                    continue
                 token_var = self.decision_vars[pos][token]
                 weight = sc.llm.nr_tokens(self.llm_name, token)
                 token_vars.append(weight * token_var)
         self.model.setObjective(gp.quicksum(token_vars), GRB.MINIMIZE)
+        
+        # Set upper cost bound if available
+        if self.upper_bound is not None:
+            self.model.addConstr(gp.quicksum(token_vars) <= self.upper_bound)
     
-    def _get_context_ids(self, k=5):
+    def _get_context_ids(self, k):
         """ Heuristically select most useful identifiers for context. 
         
         Args:
             k: select at most that many identifiers.
         
         Returns:
-            list of relevant identifiers.
+            set of relevant identifiers.
         """
         counter = collections.Counter()
         for id_1, id_2 in self.facts:
             counter.update([id_1, id_2])
         common_counts = counter.most_common(k)
-        common_ids = [ic[0] for ic in common_counts]
+        common_ids = set([ic[0] for ic in common_counts])
         return common_ids
     
     def _variables(self):

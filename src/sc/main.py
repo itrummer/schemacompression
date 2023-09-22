@@ -24,7 +24,7 @@ if __name__ == '__main__':
     
     #logging.basicConfig(level=logging.DEBUG)
     openai.api_key = args.aikey
-    model = 'gpt-3.5-turbo'
+    model = 'text-davinci-003'
     with open(args.file) as file:
         spider = json.load(file)
     
@@ -145,7 +145,8 @@ CREATE TABLE lineitem
     splits = schema.split()
     for split in splits:
         split.merge_columns()
-        ilpCompression = sc.compress.gurobi.IlpCompression(split)
+        ilpCompression = sc.compress.gurobi.IlpCompression(
+            split, llm_name=model, max_depth=2, top_k=5)
         result = ilpCompression.compress()
         print(result)
     
