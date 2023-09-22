@@ -56,7 +56,7 @@ class Table():
     
     def text(self):
         """ Text description of table. """
-        columns_text = ','.join([c.sql() for c in self.columns])
+        columns_text = ', '.join([c.sql() for c in self.columns])
         return f'{self.name}({columns_text})'
 
 

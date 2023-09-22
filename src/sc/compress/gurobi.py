@@ -43,10 +43,10 @@ class IlpCompression():
         
         self.true_facts, self.false_facts = schema.get_facts()
         self.facts = self.true_facts + self.false_facts
-        self.max_length = round(1.5*len(self.true_facts))
+        self.max_length = round(2*len(self.true_facts))
         
         self.model = gp.Model('Compression')
-        self.model.Params.TimeLimit = 3*60
+        self.model.Params.TimeLimit = 2*60
         self.decision_vars, self.context_vars, self.fact_vars = self._variables()
         
         logging.debug(f'True facts: {self.true_facts}')
@@ -82,8 +82,8 @@ class IlpCompression():
         
         joined = ''.join(parts)
         
-        # Remove spaces before closing parenthesis
-        polished = joined.replace(' )', ')')
+        # Remove spaces before closing parenthesis and at the end
+        polished = joined.replace(' )', ')').rstrip()
 
         return polished
 
@@ -192,7 +192,7 @@ class IlpCompression():
             cur_activations = {}
             for token in self.ids:
                 token_var = self.decision_vars[pos][token]
-                name = f'Activate_P{pos}_{token}'
+                name = f'Activate_P{pos}_{token[:200]}'
                 activation = self.model.addVar(vtype=GRB.BINARY, name=name)
                 self.model.addConstr(activation <= opening)
                 self.model.addConstr(activation <= token_var)
@@ -267,12 +267,14 @@ class IlpCompression():
     
     def _add_pruning(self):
         """ Add constraints to restrict search space size. """
+        logging.info('Pruning search space ...')
         counter = collections.Counter()
         for id_1, id_2 in self.true_facts:
             counter.update([id_1, id_2])
         
         common_counts = counter.most_common(self.top_k)
         common_ids = set([ic[0] for ic in common_counts])
+        logging.info(f'Restricting inner context to {common_ids}')
         
         # Heuristically prune context with depth > 1
         for depth in range(1, self.max_depth):
@@ -281,6 +283,12 @@ class IlpCompression():
                     for pos in range(self.max_length):
                         context_var = self.context_vars[pos][depth][token]
                         self.model.addConstr(context_var == 0)
+        
+        # Start with description of table columns
+        first_table = self.schema.get_tables()[0]
+        table_token = f'table {first_table} column'
+        self.model.addConstr(self.decision_vars[0][table_token] == 1)
+        self.model.addConstr(self.decision_vars[0]['('] == 1)
         
         # Restrict the number of mentions for each token
         # for token in self.ids:
@@ -317,7 +325,7 @@ class IlpCompression():
         outer_vars = [self.context_vars[pos][d][outer_token] 
                       for d in range(self.max_depth)]
         inner_var = self.decision_vars[pos][inner_token]
-        name = f'Mention_P{pos}_{outer_token}_{inner_token}'
+        name = f'Mention_P{pos}_{outer_token[:100]}_{inner_token[:100]}'
         mention_var = self.model.addVar(vtype=GRB.BINARY, name=name)
         self.model.addConstr(mention_var <= gp.quicksum(outer_vars))
         self.model.addConstr(mention_var <= inner_var)
@@ -336,7 +344,7 @@ class IlpCompression():
         for pos in range(self.max_length):
             cur_pos_vars = {}
             for token in self.tokens:
-                name = f'P{pos}_{token}'
+                name = f'P{pos}_{token[:200]}'
                 decision_var = self.model.addVar(vtype=GRB.BINARY, name=name)
                 cur_pos_vars[token] = decision_var
             decision_vars.append(cur_pos_vars)
@@ -350,7 +358,7 @@ class IlpCompression():
                 cur_depth_vars = {}
                 cur_pos_vars.append(cur_depth_vars)
                 for context_id in self.ids:
-                    name = f'P{pos}_D{depth}_{context_id}'
+                    name = f'P{pos}_D{depth}_{context_id[:200]}'
                     context_var = self.model.addVar(
                         vtype=GRB.BINARY, name=name)
                     cur_depth_vars[context_id] = context_var
@@ -361,7 +369,7 @@ class IlpCompression():
         for fact_key in fact_keys:
             id_1 = min(fact_key)
             id_2 = max(fact_key)
-            fact_name = f'{id_1}_{id_2}'
+            fact_name = f'{id_1[:100]}_{id_2[:100]}'
             fact_var = self.model.addVar(
                 vtype=GRB.BINARY, name=fact_name)
             ids = frozenset({id_1, id_2})

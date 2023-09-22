@@ -22,7 +22,7 @@ if __name__ == '__main__':
     parser.add_argument('aikey', type=str, help='API key of OpenAI')
     args = parser.parse_args()
     
-    #logging.basicConfig(level=logging.DEBUG)
+    #logging.basicConfig(level=logging.INFO)
     openai.api_key = args.aikey
     model = 'text-davinci-003'
     with open(args.file) as file:
@@ -30,7 +30,7 @@ if __name__ == '__main__':
     
     raw_total = 0
     compressed_total = 0
-    db_name = 'body_builder'
+    db_name = 'soccer_1'
     spider_db = spider[db_name]
     # for db_name, spider_db in spider.items():
     
@@ -94,75 +94,82 @@ if __name__ == '__main__':
     # c_comment     VARCHAR(117) not null
 # );
 #
-# CREATE TABLE orders
-# (
-    # o_orderkey       BIGINT not null,
-    # o_custkey        BIGINT not null,
-    # o_orderstatus    CHAR(1) not null,
-    # o_totalprice     DOUBLE PRECISION not null,
-    # o_orderdate      DATE not null,
-    # o_orderpriority  CHAR(15) not null,  
-    # o_clerk          CHAR(15) not null, 
-    # o_shippriority   INTEGER not null,
-    # o_comment        VARCHAR(79) not null
-# );
+    ddl = \
+"""
+CREATE TABLE orders
+(
+    o_orderkey       BIGINT not null,
+    o_custkey        BIGINT not null,
+    o_orderstatus    CHAR(1) not null,
+    o_totalprice     DOUBLE PRECISION not null,
+    o_orderdate      DATE not null,
+    o_orderpriority  CHAR(15) not null,  
+    o_clerk          CHAR(15) not null, 
+    o_shippriority   INTEGER not null,
+    o_comment        VARCHAR(79) not null
+);
+"""
 
     
-    ddl = """
-CREATE TABLE lineitem
-(
-    l_orderkey    BIGINT not null,
-    l_partkey     BIGINT not null,
-    l_suppkey     BIGINT not null,
-    l_linenumber  BIGINT not null,
-    l_quantity    DOUBLE PRECISION not null,
-    l_extendedprice  DOUBLE PRECISION not null,
-    l_discount    DOUBLE PRECISION not null,
-    l_tax         DOUBLE PRECISION not null,
-    l_returnflag  CHAR(1) not null,
-    l_linestatus  CHAR(1) not null,
-    l_shipdate    DATE not null,
-    l_commitdate  DATE not null,
-    l_receiptdate DATE not null,
-    l_shipinstruct CHAR(25) not null,
-    l_shipmode     CHAR(10) not null,
-    l_comment      VARCHAR(44) not null
-);
-    """
-    parser = sc.parser.SchemaParser()    
-    schema = parser.parse(ddl)
-    # schema = sc.schema.parse_spider(spider_db)
+    # ddl = """
+# CREATE TABLE lineitem
+# (
+    # l_orderkey    BIGINT not null,
+    # l_partkey     BIGINT not null,
+    # l_suppkey     BIGINT not null,
+    # l_linenumber  BIGINT not null,
+    # l_quantity    DOUBLE PRECISION not null,
+    # l_extendedprice  DOUBLE PRECISION not null,
+    # l_discount    DOUBLE PRECISION not null,
+    # l_tax         DOUBLE PRECISION not null,
+    # l_returnflag  CHAR(1) not null,
+    # l_linestatus  CHAR(1) not null,
+    # l_shipdate    DATE not null,
+    # l_commitdate  DATE not null,
+    # l_receiptdate DATE not null,
+    # l_shipinstruct CHAR(25) not null,
+    # l_shipmode     CHAR(10) not null,
+    # l_comment      VARCHAR(44) not null
+# );
+    # """
+    # parser = sc.parser.SchemaParser()    
+    # schema = parser.parse(ddl)
+    schema = sc.schema.parse_spider(spider_db)
 
     raw_description = schema.text()
     raw_size = sc.llm.nr_tokens(model, raw_description)
     raw_total += raw_size
     
     #compressed_1 = sc.compress.types.compress_schema(schema)
-    compressed_2 = sc.compress.default_types.compress_schema(schema)
+    #compressed_2 = sc.compress.default_types.compress_schema(schema)
     #compressed_1_size = sc.llm.nr_tokens(model, compressed_1)
-    compressed_2_size = sc.llm.nr_tokens(model, compressed_2)
+    #compressed_2_size = sc.llm.nr_tokens(model, compressed_2)
     
+    compressed_parts = []
     splits = schema.split()
     for split in splits:
         split.merge_columns()
         ilpCompression = sc.compress.gurobi.IlpCompression(
-            split, llm_name=model, max_depth=3, top_k=3)
-        result = ilpCompression.compress()
-        print(result)
+            split, llm_name=model, max_depth=2, top_k=10)
+        compressed = ilpCompression.compress()
+        compressed_parts.append(compressed)
     
     print(f'Original\n{raw_description}')
-    print(f'Compressed\n{compressed_2}')
+    all_compressed = '\n'.join(compressed_parts)
+    print(f'Compressed\n{all_compressed}')
     
     #compressed_size = min(compressed_1_size, compressed_2_size)
-    compressed_size = compressed_2_size
-    compressed_total += compressed_size
+    # compressed_size = compressed_2_size
+    # compressed_total += compressed_size
         
         # if raw_size < compressed_size:
             # print(raw_description)
             # print(compressed_description)
 
-    print(f'Total size: {raw_total}')
-    print(f'Compressed size: {compressed_total}')
+    raw_size = sc.llm.nr_tokens(model, raw_description)
+    compressed_size = sc.llm.nr_tokens(model, all_compressed) 
+    print(f'Original size: \t{raw_size}')
+    print(f'Compressed size: \t{compressed_size}')
     
     # spider_db = spider[args.schema]
     # schema = sc.schema.parse_spider(spider_db)
