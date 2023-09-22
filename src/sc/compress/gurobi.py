@@ -34,6 +34,7 @@ class IlpCompression():
         self.max_depth = max_depth
         self.llm_name = llm_name
         self.upper_bound = upper_bound
+        self.top_k = top_k
         self.ids = schema.get_identifiers()
         self.tokens = self.ids + ['(', ')']
         
@@ -42,17 +43,17 @@ class IlpCompression():
         
         self.true_facts, self.false_facts = schema.get_facts()
         self.facts = self.true_facts + self.false_facts
-        self.context_ids = self._get_context_ids(top_k)
         self.max_length = round(1.5*len(self.true_facts))
         
         self.model = gp.Model('Compression')
-        self.model.Params.TimeLimit = 5*60
+        self.model.Params.TimeLimit = 3*60
         self.decision_vars, self.context_vars, self.fact_vars = self._variables()
         
         logging.debug(f'True facts: {self.true_facts}')
         logging.debug(f'False facts: {self.false_facts}')
         
         self._add_constraints()
+        self._add_pruning()
         self._add_objective()
         print(self.model)
 
@@ -116,16 +117,6 @@ class IlpCompression():
             empty_1 = is_empties[pos_1]
             empty_2 = is_empties[pos_2]
             self.model.addConstr(empty_1 <= empty_2)
-        
-        # Must separate consecutive tokens
-        # for pos_1 in range(self.max_length-1):
-            # pos_2 = pos_1 + 1
-            # token_vars_1 = [self.decision_vars[pos_1][t] for t in self.ids]
-            # token_vars_2 = [self.decision_vars[pos_2][t] for t in self.ids]
-            # specials_1 = [self.decision_vars[pos_1][t] for t in ['(', ')', ',']]
-            # self.model.addConstr(
-                # gp.quicksum(token_vars_1) + gp.quicksum(token_vars_2) \
-                # - gp.quicksum(specials_1) <= 1)
             
         # Select at most one ID token per position
         for pos in range(self.max_length):
@@ -231,25 +222,6 @@ class IlpCompression():
                     self.model.addConstr(var_2 >= var_1 - closing)
                     self.model.addConstr(var_2 <= var_1 + opening)
         
-        def get_mention_var(outer_token, inner_token, pos):
-            """ Generate variable representing fact mention.
-            
-            Args:
-                outer_token: token that appears in context.
-                inner_token: token that appears within context.
-                pos: position at which mention occurs.
-            """
-            outer_vars = [self.context_vars[pos][d][outer_token] 
-                          for d in range(self.max_depth)]
-            inner_var = self.decision_vars[pos][inner_token]
-            name = f'Mention_P{pos}_{outer_token}_{inner_token}'
-            mention_var = self.model.addVar(vtype=GRB.BINARY, name=name)
-            self.model.addConstr(mention_var <= gp.quicksum(outer_vars))
-            self.model.addConstr(mention_var <= inner_var)
-            self.model.addConstr(
-                mention_var >= -1 + gp.quicksum(outer_vars) + inner_var)
-            return mention_var
-
         # Link facts to nested tokens
         for fact_key in self.fact_vars.keys():
             token_1 = min(fact_key)
@@ -257,8 +229,8 @@ class IlpCompression():
             # Sum over possible mentions
             mention_vars = []
             for pos in range(self.max_length):
-                mention_var_1 = get_mention_var(token_1, token_2, pos)
-                mention_var_2 = get_mention_var(token_2, token_1, pos)
+                mention_var_1 = self._get_mention_var(token_1, token_2, pos)
+                mention_var_2 = self._get_mention_var(token_2, token_1, pos)
                 mention_vars += [mention_var_1, mention_var_2]
                     
             fact_key = frozenset({token_1, token_2})
@@ -278,14 +250,6 @@ class IlpCompression():
             fact_key = frozenset({token_1, token_2})
             fact_var = self.fact_vars[fact_key]
             self.model.addConstr(fact_var == 0)
-        
-        # Heuristically prune context with depth > 1
-        for depth in range(1, self.max_depth):
-            for token in self.ids:
-                if token not in self.context_ids:
-                    for pos in range(self.max_length):
-                        context_var = self.context_vars[pos][depth][token]
-                        self.model.addConstr(context_var == 0)
 
     def _add_objective(self):
         """ Add optimization objective. """
@@ -300,6 +264,31 @@ class IlpCompression():
         # Set upper cost bound if available
         if self.upper_bound is not None:
             self.model.addConstr(gp.quicksum(token_vars) <= self.upper_bound)
+    
+    def _add_pruning(self):
+        """ Add constraints to restrict search space size. """
+        counter = collections.Counter()
+        for id_1, id_2 in self.true_facts:
+            counter.update([id_1, id_2])
+        
+        common_counts = counter.most_common(self.top_k)
+        common_ids = set([ic[0] for ic in common_counts])
+        
+        # Heuristically prune context with depth > 1
+        for depth in range(1, self.max_depth):
+            for token in self.ids:
+                if token not in common_ids:
+                    for pos in range(self.max_length):
+                        context_var = self.context_vars[pos][depth][token]
+                        self.model.addConstr(context_var == 0)
+        
+        # Restrict the number of mentions for each token
+        # for token in self.ids:
+            # nr_true = counter[token]
+            # token_vars = [
+                # self.decision_vars[p][token] 
+                # for p in range(self.max_length)]
+            # self.model.addConstr(gp.quicksum(token_vars) <= nr_true)
     
     def _get_context_ids(self, k):
         """ Heuristically select most useful identifiers for context. 
@@ -316,6 +305,25 @@ class IlpCompression():
         common_counts = counter.most_common(k)
         common_ids = set([ic[0] for ic in common_counts])
         return common_ids
+    
+    def _get_mention_var(self, outer_token, inner_token, pos):
+        """ Generate variable representing fact mention.
+        
+        Args:
+            outer_token: token that appears in context.
+            inner_token: token that appears within context.
+            pos: position at which mention occurs.
+        """
+        outer_vars = [self.context_vars[pos][d][outer_token] 
+                      for d in range(self.max_depth)]
+        inner_var = self.decision_vars[pos][inner_token]
+        name = f'Mention_P{pos}_{outer_token}_{inner_token}'
+        mention_var = self.model.addVar(vtype=GRB.BINARY, name=name)
+        self.model.addConstr(mention_var <= gp.quicksum(outer_vars))
+        self.model.addConstr(mention_var <= inner_var)
+        self.model.addConstr(
+            mention_var >= -1 + gp.quicksum(outer_vars) + inner_var)
+        return mention_var
     
     def _variables(self):
         """ Returns variables for input schema. 

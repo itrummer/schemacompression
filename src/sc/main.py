@@ -146,7 +146,7 @@ CREATE TABLE lineitem
     for split in splits:
         split.merge_columns()
         ilpCompression = sc.compress.gurobi.IlpCompression(
-            split, llm_name=model, max_depth=2, top_k=5)
+            split, llm_name=model, max_depth=3, top_k=3)
         result = ilpCompression.compress()
         print(result)
     
