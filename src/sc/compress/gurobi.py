@@ -17,17 +17,21 @@ from gurobipy import GRB
 class IlpCompression():
     """ Compresses schemata via integer linear programming. """
     
-    def __init__(self, schema, max_depth=2, llm_name='gpt-3.5-turbo'):
+    def __init__(
+            self, schema, max_depth=2, 
+            llm_name='gpt-3.5-turbo', neglect_comma=False):
         """ Initializes for given schema. 
         
         Args:
             schema: a schema to compress.
             max_depth: maximal context depth.
             llm_name: name of LLM to use.
+            neglect_comma: do not count comma in cost function.
         """
         self.schema = schema
         self.max_depth = max_depth
         self.llm_name = llm_name
+        self.neglect_comma = neglect_comma
         self.ids = schema.get_identifiers()
         self.tokens = self.ids + ['(', ')', ',']
         
@@ -37,10 +41,10 @@ class IlpCompression():
         self.true_facts, self.false_facts = schema.get_facts()
         self.facts = self.true_facts + self.false_facts
         self.context_ids = self._get_context_ids()
-        self.max_length = 2*len(self.true_facts)
+        self.max_length = round(1.5*len(self.true_facts))
         
         self.model = gp.Model('Compression')
-        self.model.Params.TimeLimit = 6*60
+        self.model.Params.TimeLimit = 10*60
         self.decision_vars, self.context_vars, self.fact_vars = self._variables()
         
         logging.debug(f'True facts: {self.true_facts}')
@@ -214,22 +218,23 @@ class IlpCompression():
                     self.model.addConstr(var_2 >= var_1 - closing)
                     self.model.addConstr(var_2 <= var_1 + opening)
         
-        def get_mention_var(outer_token, inner_token, pos, depth):
+        def get_mention_var(outer_token, inner_token, pos):
             """ Generate variable representing fact mention.
             
             Args:
                 outer_token: token that appears in context.
                 inner_token: token that appears within context.
                 pos: position at which mention occurs.
-                depth: depth of relevant context.
             """
-            outer_var = self.context_vars[pos][depth][outer_token]
+            outer_vars = [self.context_vars[pos][d][outer_token] 
+                          for d in range(self.max_depth)]
             inner_var = self.decision_vars[pos][inner_token]
-            name = f'Mention_P{pos}_D{depth}_{outer_token}_{inner_token}'
+            name = f'Mention_P{pos}_{outer_token}_{inner_token}'
             mention_var = self.model.addVar(vtype=GRB.BINARY, name=name)
-            self.model.addConstr(mention_var <= outer_var)
+            self.model.addConstr(mention_var <= gp.quicksum(outer_vars))
             self.model.addConstr(mention_var <= inner_var)
-            self.model.addConstr(mention_var >= -1 + outer_var + inner_var)
+            self.model.addConstr(
+                mention_var >= -1 + gp.quicksum(outer_vars) + inner_var)
             return mention_var
 
         # Link facts to nested tokens
@@ -239,12 +244,9 @@ class IlpCompression():
             # Sum over possible mentions
             mention_vars = []
             for pos in range(self.max_length):
-                for depth in range(self.max_depth):
-                    mention_var_1 = get_mention_var(
-                        token_1, token_2, pos, depth)
-                    mention_var_2 = get_mention_var(
-                        token_2, token_1, pos, depth)
-                    mention_vars += [mention_var_1, mention_var_2]
+                mention_var_1 = get_mention_var(token_1, token_2, pos)
+                mention_var_2 = get_mention_var(token_2, token_1, pos)
+                mention_vars += [mention_var_1, mention_var_2]
                     
             fact_key = frozenset({token_1, token_2})
             fact_var = self.fact_vars[fact_key]
@@ -269,6 +271,8 @@ class IlpCompression():
         token_vars = []
         for pos in range(self.max_length):
             for token in self.tokens:
+                if token == ',' and self.neglect_comma:
+                    continue
                 token_var = self.decision_vars[pos][token]
                 weight = sc.llm.nr_tokens(self.llm_name, token)
                 token_vars.append(weight * token_var)

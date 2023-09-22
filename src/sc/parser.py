@@ -55,7 +55,6 @@ class SchemaParser():
         Returns:
             result of specialized handling.
         """
-        print(node)
         handler = f'_{node.key.lower()}'
         return getattr(self, handler)(node)
     

@@ -3,7 +3,7 @@ Created on Sep 7, 2023
 
 @author: immanueltrummer
 '''
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import List
 
@@ -30,6 +30,25 @@ class Table():
     name: str
     columns: List[Column]
     
+    def merge_columns(self):
+        """ Merge columns with same annotations. """
+        key2cols = defaultdict(lambda:[])
+        for col in self.columns:
+            col_key = ','.join(col.annotations) + col.type
+            key2cols[col_key].append(col)
+        
+        new_columns = []
+        for col_key, cols in key2cols.items():
+            names = [c.name for c in cols]
+            group_name = ' '.join(names)
+            first_col = cols[0]
+            group_type = first_col.type
+            group_annotations = first_col.annotations
+            new_col = Column(group_name, group_type, group_annotations)
+            new_columns.append(new_col)
+        
+        self.columns = new_columns
+
     def sql(self):
         """ DDL description of table. """
         columns_sql = ','.join([c.sql() for c in self.columns])
@@ -171,6 +190,11 @@ class Schema():
     def get_tables(self):
         """ Returns all table names as list. """
         return [t.name for t in self.tables]
+
+    def merge_columns(self):
+        """ Group columns in all tables. """
+        for table in self.tables:
+            table.merge_columns()
 
     def split(self):
         """ Splits schema into multiple parts. 
