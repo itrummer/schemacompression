@@ -73,7 +73,7 @@ class IlpCompression():
         for short, short_text in self.short2text.items():
             short_var = self.shortcut_vars[short]
             if short_var.X >= 0.5:
-                intro_text = f'{short}:{short_text} '
+                intro_text = f'{short} substitutes {short_text} '
                 parts.append(intro_text)
 
         # Concatenate selected representations
@@ -306,7 +306,7 @@ class IlpCompression():
         # Count space for introducing shortcuts
         for short, short_text in self.short2text.items():
             short_var = self.shortcut_vars[short]
-            intro_text = f'{short}:{short_text} '
+            intro_text = f'{short} substitutes {short_text} '
             weight = sc.llm.nr_tokens(self.llm_name, intro_text)
             terms.append(weight * short_var)
         
