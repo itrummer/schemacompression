@@ -47,7 +47,7 @@ class IlpCompression():
         self.max_length = round(2*len(self.true_facts))
         
         self.model = gp.Model('Compression')
-        self.model.Params.TimeLimit = 2*60
+        self.model.Params.TimeLimit = 10*60
         self.decision_vars, self.context_vars, self.fact_vars, \
             self.representation_vars, self.shortcut_vars = self._variables()
         
@@ -71,8 +71,10 @@ class IlpCompression():
         # Introduce shortcuts, if any
         parts = []
         for short, short_text in self.short2text.items():
-            intro_text = f'{short}:{short_text} '
-            parts.append(intro_text)
+            short_var = self.shortcut_vars[short]
+            if short_var.X >= 0.5:
+                intro_text = f'{short}:{short_text} '
+                parts.append(intro_text)
 
         # Concatenate selected representations
         for pos in range(self.max_length):
@@ -81,7 +83,7 @@ class IlpCompression():
                     self.representation_vars[pos][token].items():
                     if rep_var.X >= 0.5:
                         short_text = self.short2text[short] if short else ''
-                        rep_text = token.replace(short, short_text)
+                        rep_text = token.replace(short_text, short)
                         parts.append(rep_text)
             
             nr_separators = 0
@@ -275,8 +277,9 @@ class IlpCompression():
         for short, short_var in self.shortcut_vars.items():
             for pos in range(self.max_length):
                 for token in self.ids:
-                    rep_var = self.representation_vars[pos][token][short]
-                    self.model.addConstr(rep_var <= short_var)
+                    if short in self.representation_vars[pos][token]:
+                        rep_var = self.representation_vars[pos][token][short]
+                        self.model.addConstr(rep_var <= short_var)
 
     def _add_objective(self):
         """ Add optimization objective. """
@@ -284,6 +287,7 @@ class IlpCompression():
         
         # Sum up representation length over all selections
         for pos in range(self.max_length):
+            # Sum up over ID tokens
             for token in self.ids:
                 for short, rep_var in \
                     self.representation_vars[pos][token].items():
@@ -294,6 +298,10 @@ class IlpCompression():
                     shortened = token.replace(short_text, short)
                     weight = sc.llm.nr_tokens(self.llm_name, shortened)
                     terms.append(weight * rep_var)
+            
+            # Sum over auxiliary tokens
+            for token in ['(', ')']:
+                terms.append(1 * self.decision_vars[pos][token])
         
         # Count space for introducing shortcuts
         for short, short_text in self.short2text.items():

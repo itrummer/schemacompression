@@ -94,47 +94,46 @@ if __name__ == '__main__':
     # c_comment     VARCHAR(117) not null
 # );
 #
-    ddl = \
-"""
-CREATE TABLE orders
-(
-    o_orderkey       BIGINT not null,
-    o_custkey        BIGINT not null,
-    o_orderstatus    CHAR(1) not null,
-    o_totalprice     DOUBLE PRECISION not null,
-    o_orderdate      DATE not null,
-    o_orderpriority  CHAR(15) not null,  
-    o_clerk          CHAR(15) not null, 
-    o_shippriority   INTEGER not null,
-    o_comment        VARCHAR(79) not null
-);
-"""
+    # ddl = \
+# """
+# CREATE TABLE orders
+# (
+    # o_orderkey       BIGINT not null,
+    # o_custkey        BIGINT not null,
+    # o_orderstatus    CHAR(1) not null,
+    # o_totalprice     DOUBLE PRECISION not null,
+    # o_orderdate      DATE not null,
+    # o_orderpriority  CHAR(15) not null,  
+    # o_clerk          CHAR(15) not null, 
+    # o_shippriority   INTEGER not null,
+    # o_comment        VARCHAR(79) not null
+# );
+# """
 
     
-    # ddl = """
-# CREATE TABLE lineitem
-# (
-    # l_orderkey    BIGINT not null,
-    # l_partkey     BIGINT not null,
-    # l_suppkey     BIGINT not null,
-    # l_linenumber  BIGINT not null,
-    # l_quantity    DOUBLE PRECISION not null,
-    # l_extendedprice  DOUBLE PRECISION not null,
-    # l_discount    DOUBLE PRECISION not null,
-    # l_tax         DOUBLE PRECISION not null,
-    # l_returnflag  CHAR(1) not null,
-    # l_linestatus  CHAR(1) not null,
-    # l_shipdate    DATE not null,
-    # l_commitdate  DATE not null,
-    # l_receiptdate DATE not null,
-    # l_shipinstruct CHAR(25) not null,
-    # l_shipmode     CHAR(10) not null,
-    # l_comment      VARCHAR(44) not null
-# );
-    # """
-    # parser = sc.parser.SchemaParser()    
-    # schema = parser.parse(ddl)
-    schema = sc.schema.parse_spider(spider_db)
+    ddl = """
+CREATE TABLE lineitem
+(
+    l_orderkey    BIGINT not null,
+    l_partkey     BIGINT not null,
+    l_suppkey     BIGINT not null,
+    l_linenumber  BIGINT not null,
+    l_quantity    DOUBLE PRECISION not null,
+    l_extendedprice  DOUBLE PRECISION not null,
+    l_discount    DOUBLE PRECISION not null,
+    l_tax         DOUBLE PRECISION not null,
+    l_returnflag  CHAR(1) not null,
+    l_linestatus  CHAR(1) not null,
+    l_shipdate    DATE not null,
+    l_commitdate  DATE not null,
+    l_receiptdate DATE not null,
+    l_shipinstruct CHAR(25) not null,
+    l_shipmode     CHAR(10) not null,
+    l_comment      VARCHAR(44) not null
+);"""
+    parser = sc.parser.SchemaParser()    
+    schema = parser.parse(ddl)
+    # schema = sc.schema.parse_spider(spider_db)
 
     raw_description = schema.text()
     raw_size = sc.llm.nr_tokens(model, raw_description)
@@ -145,14 +144,17 @@ CREATE TABLE orders
     #compressed_1_size = sc.llm.nr_tokens(model, compressed_1)
     #compressed_2_size = sc.llm.nr_tokens(model, compressed_2)
     
+    # {'*':'buildUpPlay', '&':'player_'}
+    
     compressed_parts = []
     splits = schema.split()
     for split in splits:
         split.merge_columns()
         ilpCompression = sc.compress.gurobi.IlpCompression(
             split, llm_name=model, max_depth=2, 
-            context_k=10, short2text={})
+            context_k=10, short2text={'*':'l_'})
         compressed = ilpCompression.compress()
+        print(compressed)
         compressed_parts.append(compressed)
     
     print(f'Original\n{raw_description}')
