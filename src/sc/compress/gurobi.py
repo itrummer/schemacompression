@@ -18,9 +18,8 @@ class IlpCompression():
     """ Compresses schemata via integer linear programming. """
     
     def __init__(
-            self, schema, max_depth=1, 
-            llm_name='gpt-3.5-turbo',
-            upper_bound=None, top_k=5):
+            self, schema, max_depth=1, llm_name='gpt-3.5-turbo', 
+            upper_bound=None, context_k=5, short2text={}):
         """ Initializes for given schema. 
         
         Args:
@@ -28,13 +27,15 @@ class IlpCompression():
             max_depth: maximal context depth.
             llm_name: name of LLM to use.
             upper_bound: upper bound on cost.
-            top_k: consider k most frequent tokens for context.
+            context_k: consider k most frequent tokens for context.
+            short2text: maps candidate shortcuts to text.
         """
         self.schema = schema
         self.max_depth = max_depth
         self.llm_name = llm_name
         self.upper_bound = upper_bound
-        self.top_k = top_k
+        self.context_k = context_k
+        self.short2text = short2text
         self.ids = schema.get_identifiers()
         self.tokens = self.ids + ['(', ')']
         
@@ -47,7 +48,8 @@ class IlpCompression():
         
         self.model = gp.Model('Compression')
         self.model.Params.TimeLimit = 2*60
-        self.decision_vars, self.context_vars, self.fact_vars = self._variables()
+        self.decision_vars, self.context_vars, self.fact_vars, \
+            self.representation_vars, self.shortcut_vars = self._variables()
         
         logging.debug(f'True facts: {self.true_facts}')
         logging.debug(f'False facts: {self.false_facts}')
@@ -65,11 +67,22 @@ class IlpCompression():
         """
         self.model.optimize()
         # Extract solution
+        
+        # Introduce shortcuts, if any
         parts = []
+        for short, short_text in self.short2text.items():
+            intro_text = f'{short}:{short_text} '
+            parts.append(intro_text)
+
+        # Concatenate selected representations
         for pos in range(self.max_length):
             for token in self.ids:
-                if self.decision_vars[pos][token].X >= 0.5:
-                    parts += [token]
+                for short, rep_var in \
+                    self.representation_vars[pos][token].items():
+                    if rep_var.X >= 0.5:
+                        short_text = self.short2text[short] if short else ''
+                        rep_text = token.replace(short, short_text)
+                        parts.append(rep_text)
             
             nr_separators = 0
             for token in ['(', ')']:
@@ -250,20 +263,51 @@ class IlpCompression():
             fact_key = frozenset({token_1, token_2})
             fact_var = self.fact_vars[fact_key]
             self.model.addConstr(fact_var == 0)
+        
+        # Select exactly one representation for selected token
+        for pos in range(self.max_length):
+            for token in self.ids:
+                decision_var = self.decision_vars[pos][token]
+                rep_vars = self.representation_vars[pos][token].values()
+                self.model.addConstr(gp.quicksum(rep_vars) == decision_var)
+                
+        # Need to introduce used shortcuts
+        for short, short_var in self.shortcut_vars.items():
+            for pos in range(self.max_length):
+                for token in self.ids:
+                    rep_var = self.representation_vars[pos][token][short]
+                    self.model.addConstr(rep_var <= short_var)
 
     def _add_objective(self):
         """ Add optimization objective. """
-        token_vars = []
+        terms = []
+        
+        # Sum up representation length over all selections
         for pos in range(self.max_length):
-            for token in self.tokens:
-                token_var = self.decision_vars[pos][token]
-                weight = sc.llm.nr_tokens(self.llm_name, token)
-                token_vars.append(weight * token_var)
-        self.model.setObjective(gp.quicksum(token_vars), GRB.MINIMIZE)
+            for token in self.ids:
+                for short, rep_var in \
+                    self.representation_vars[pos][token].items():
+                    if not short:
+                        short_text = ''
+                    else:
+                        short_text = self.short2text[short]
+                    shortened = token.replace(short_text, short)
+                    weight = sc.llm.nr_tokens(self.llm_name, shortened)
+                    terms.append(weight * rep_var)
+        
+        # Count space for introducing shortcuts
+        for short, short_text in self.short2text.items():
+            short_var = self.shortcut_vars[short]
+            intro_text = f'{short}:{short_text} '
+            weight = sc.llm.nr_tokens(self.llm_name, intro_text)
+            terms.append(weight * short_var)
+        
+        # Optimization goal is to minimize sum of terms
+        self.model.setObjective(gp.quicksum(terms), GRB.MINIMIZE)
         
         # Set upper cost bound if available
         if self.upper_bound is not None:
-            self.model.addConstr(gp.quicksum(token_vars) <= self.upper_bound)
+            self.model.addConstr(gp.quicksum(terms) <= self.upper_bound)
     
     def _add_pruning(self):
         """ Add constraints to restrict search space size. """
@@ -272,7 +316,7 @@ class IlpCompression():
         for id_1, id_2 in self.true_facts:
             counter.update([id_1, id_2])
         
-        common_counts = counter.most_common(self.top_k)
+        common_counts = counter.most_common(self.context_k)
         common_ids = set([ic[0] for ic in common_counts])
         logging.info(f'Restricting inner context to {common_ids}')
         
@@ -289,30 +333,6 @@ class IlpCompression():
         table_token = f'table {first_table} column'
         self.model.addConstr(self.decision_vars[0][table_token] == 1)
         self.model.addConstr(self.decision_vars[0]['('] == 1)
-        
-        # Restrict the number of mentions for each token
-        # for token in self.ids:
-            # nr_true = counter[token]
-            # token_vars = [
-                # self.decision_vars[p][token] 
-                # for p in range(self.max_length)]
-            # self.model.addConstr(gp.quicksum(token_vars) <= nr_true)
-    
-    def _get_context_ids(self, k):
-        """ Heuristically select most useful identifiers for context. 
-        
-        Args:
-            k: select at most that many identifiers.
-        
-        Returns:
-            set of relevant identifiers.
-        """
-        counter = collections.Counter()
-        for id_1, id_2 in self.facts:
-            counter.update([id_1, id_2])
-        common_counts = counter.most_common(k)
-        common_ids = set([ic[0] for ic in common_counts])
-        return common_ids
     
     def _get_mention_var(self, outer_token, inner_token, pos):
         """ Generate variable representing fact mention.
@@ -337,7 +357,7 @@ class IlpCompression():
         """ Returns variables for input schema. 
         
         Returns:
-            decision variables, context variables, and fact variables.
+            decisions, context, facts, representation, shortcuts.
         """
         # Access by decision_vars[position][token]
         decision_vars = []
@@ -375,8 +395,37 @@ class IlpCompression():
             ids = frozenset({id_1, id_2})
             fact_vars[ids] = fact_var
         
+        # Access by representation_vars[pos][token][short]
+        representation_vars = []
+        for pos in range(self.max_length):
+            cur_pos_vars = {}
+            for token in self.ids:
+                cur_token_vars = {}
+                
+                name = f'Rep_P{pos}_{token[:200]}'
+                empty_short_var = self.model.addVar(
+                    vtype=GRB.BINARY, name=name)
+                cur_token_vars[''] = empty_short_var
+                
+                for short, text in self.short2text.items():
+                    if text in token:
+                        name = f'Rep_P{pos}_{token[:200]}_{short}'
+                        short_var = self.model.addVar(
+                            vtype=GRB.BINARY, name=name)
+                        cur_token_vars[short] = short_var
+                cur_pos_vars[token] = cur_token_vars
+            representation_vars.append(cur_pos_vars)
+        
+        # Access by shortcuts[short]
+        shortcut_vars = {}
+        for short in self.short2text.keys():
+            name = f'Shortcut_{short}'
+            shortcut_var = self.model.addVar(vtype=GRB.BINARY, name=name)
+            shortcut_vars[short] = shortcut_var
+        
         logging.debug(f'Fact variable keys: {fact_vars.keys()}')
-        return decision_vars, context_vars, fact_vars
+        return decision_vars, context_vars, \
+            fact_vars, representation_vars, shortcut_vars
         
 
 if __name__ == '__main__':

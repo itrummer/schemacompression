@@ -6,6 +6,7 @@ Created on Sep 7, 2023
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import List
+from sc.llm import nr_tokens
 
 
 @dataclass
@@ -218,6 +219,44 @@ class Schema():
             a string consisting of DDL commands.
         """
         return '\n'.join([t.sql() for t in self.tables])
+    
+    def prefix_frequency(self):
+        """ Returns prefixes and associated frequencies.
+        
+        Returns:
+            counter mapping prefixes to frequencies.
+        """
+        counter = Counter()
+        for token in self.get_identifiers():
+            token_length = len(token)
+            for prefix_length in range(1, token_length+1):
+                prefix = token[:prefix_length]
+                counter.update([prefix])
+        
+        print(counter.most_common(10))
+        return counter
+    
+    def prefixes(self, model_name):
+        """ Returns good prefix candidates for shortcuts.
+        
+        Args:
+            model_name: calculate token counts for this model.
+        
+        Returns:
+            shortcut candidates, sorted by benefit (descending).
+        """
+        token2benefit = {}
+        token_frequency = self.prefix_frequency()
+        for token, frequency in token_frequency.items():
+            size = nr_tokens(model_name, token)
+            benefit = (size-1) * frequency - size - 2
+            token2benefit[token] = benefit
+        
+        print(token2benefit)
+        
+        sorted_items = sorted(
+            token2benefit.items(), key=lambda i:i[1], reverse=True)
+        return [s[0] for s in sorted_items]
     
     def text(self):
         """ Returns text representation of schema. """

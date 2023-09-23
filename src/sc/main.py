@@ -150,7 +150,8 @@ CREATE TABLE orders
     for split in splits:
         split.merge_columns()
         ilpCompression = sc.compress.gurobi.IlpCompression(
-            split, llm_name=model, max_depth=2, top_k=10)
+            split, llm_name=model, max_depth=2, 
+            context_k=10, short2text={})
         compressed = ilpCompression.compress()
         compressed_parts.append(compressed)
     
