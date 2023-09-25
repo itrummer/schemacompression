@@ -336,10 +336,26 @@ class IlpCompression():
                         context_var = self.context_vars[pos][depth][token]
                         self.model.addConstr(context_var == 0)
         
+        # Avoid nesting mutually exclusive facts
+        for pos in range(self.max_length):
+            table_vars = []
+            for depth in range(self.max_depth):
+                for table in self.schema.tables:
+                    pred = table.as_predicate()
+                    table_var = self.context_vars[pos][depth][pred]
+                    table_vars.append(table_var)
+            self.model.addConstr(gp.quicksum(table_vars) <= 1)
+            
+            col_vars = []
+            for col in self.schema.get_columns():
+                for depth in range(self.max_depth):
+                    col_var = self.context_vars[pos][depth][col]
+                    col_vars.append(col_var)
+            self.model.addConstr(gp.quicksum(col_vars) <= 1)        
+        
         # Start with description of table columns
-        first_table = self.schema.get_tables()[0]
-        table_token = f'table {first_table} column'
-        self.model.addConstr(self.decision_vars[0][table_token] == 1)
+        first_table_pred = self.schema.tables[0].as_predicate()
+        self.model.addConstr(self.decision_vars[0][first_table_pred] == 1)
         self.model.addConstr(self.decision_vars[0]['('] == 1)
     
     def _get_mention_var(self, outer_token, inner_token, pos):
