@@ -220,43 +220,21 @@ class Schema():
         """
         return '\n'.join([t.sql() for t in self.tables])
     
-    def prefix_frequency(self):
-        """ Returns prefixes and associated frequencies.
-        
-        Returns:
-            counter mapping prefixes to frequencies.
-        """
-        counter = Counter()
-        for token in self.get_identifiers():
-            token_length = len(token)
-            for prefix_length in range(1, token_length+1):
-                prefix = token[:prefix_length]
-                counter.update([prefix])
-        
-        print(counter.most_common(10))
-        return counter
-    
-    def prefixes(self, model_name):
+    def prefixes(self, llm_name):
         """ Returns good prefix candidates for shortcuts.
         
         Args:
-            model_name: calculate token counts for this model.
+            llm_name: select prefixes for this LLM.
         
         Returns:
             shortcut candidates, sorted by benefit (descending).
         """
-        token2benefit = {}
-        token_frequency = self.prefix_frequency()
-        for token, frequency in token_frequency.items():
-            size = nr_tokens(model_name, token)
-            benefit = (size-1) * frequency - size - 2
-            token2benefit[token] = benefit
-        
-        print(token2benefit)
-        
+        prefix2count = self._prefix_frequency()
+        pruned2count = self._prune_prefixes(prefix2count, llm_name)
         sorted_items = sorted(
-            token2benefit.items(), key=lambda i:i[1], reverse=True)
-        return [s[0] for s in sorted_items]
+            pruned2count.items(), key=lambda i:i[1], reverse=True)
+        sorted_prefixes = [i[0] for i in sorted_items]
+        return sorted_prefixes
     
     def text(self):
         """ Returns text representation of schema. """
@@ -277,6 +255,18 @@ class Schema():
                         column.annotations.append(annotation)
                         break
                 break
+    
+    def _count_prefixes(self, counter, identifier):
+        """ Count prefixes of given identifier.
+        
+        Args:
+            counter: update this counter object.
+            identifier: consider prefixes of this identifier.
+        """
+        id_length = len(identifier)
+        for prefix_length in range(2, id_length+1):
+            prefix = identifier[:prefix_length]
+            counter.update([prefix])
     
     def _full_name(self, table, column):
         """ Returns fully qualified column name.
@@ -305,7 +295,46 @@ class Schema():
             True if the column appears in multiple tables.
         """
         return (self.column_count[col_name] > 1)
-
+    
+    def _prefix_frequency(self):
+        """ Returns prefixes and associated frequencies.
+        
+        Returns:
+            counter mapping prefixes to frequencies.
+        """
+        counter = Counter()
+        for table in self.tables:
+            self._count_prefixes(counter, table.name)
+            for column in table.columns:
+                self._count_prefixes(counter, column.name)
+                # for annotation in column.annotations:
+                    # self._count_prefixes(counter, annotation)
+        
+        return counter
+    
+    def _prune_prefixes(self, prefix2count, llm_name):
+        """ Prune prefixes dominated by others.
+        
+        Args:
+            prefix2count: maps prefixes to counts.
+            llm_name: prune prefixes for this LLM.
+        
+        Returns:
+            pruned dictionary mapping prefixes to counts.
+        """
+        pruned = {
+            k:c for k, c in prefix2count.items() \
+            if c>1 and nr_tokens(llm_name, k)>1}
+        for prefix in prefix2count.keys():
+            for sub_length in range(len(prefix)):
+                sub_prefix = prefix[:sub_length]
+                if sub_prefix in pruned:
+                    pre_count = prefix2count[prefix]
+                    sub_count = prefix2count[sub_prefix]
+                    if sub_count <= pre_count:
+                        del pruned[sub_prefix]
+        
+        return pruned
 
 def parse_spider(spider_db):
     """ Parse schema from Spider representation.
@@ -322,10 +351,13 @@ def parse_spider(spider_db):
     spider_pkeys = spider_db['primary_keys']
     spider_fkeys = spider_db['foreign_keys']
     
+    type_map = {'text':'varchar(255)', 'number':'numeric(3, 1)'}
+    
     tables = [Table(name, []) for name in spider_tables]
     for (table_idx, col_name), col_type in zip(spider_columns, spider_types):
         if not col_name == '*':
-            column = Column(col_name, col_type, [col_type])
+            col_type = type_map[col_type]
+            column = Column(col_name, col_type, [col_type, 'NOT NULL'])
             table = tables[table_idx]
             table.columns.append(column)
     

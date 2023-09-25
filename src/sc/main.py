@@ -31,6 +31,9 @@ if __name__ == '__main__':
     raw_total = 0
     compressed_total = 0
     db_name = 'soccer_1'
+    #db_name = 'bike_1' # 632 vs 307
+    #db_name = 'university_basketball'
+    #db_name = 'county_public_safety' # ca. 40% savings
     spider_db = spider[db_name]
     # for db_name, spider_db in spider.items():
     
@@ -131,9 +134,21 @@ CREATE TABLE lineitem
     l_shipmode     CHAR(10) not null,
     l_comment      VARCHAR(44) not null
 );"""
-    parser = sc.parser.SchemaParser()    
-    schema = parser.parse(ddl)
-    # schema = sc.schema.parse_spider(spider_db)
+    # parser = sc.parser.SchemaParser()    
+    # schema = parser.parse(ddl)
+    schema = sc.schema.parse_spider(spider_db)
+    print(schema.text())
+    
+    prefixes = schema.prefixes(model)
+    print(f'Sorted prefixes: {prefixes}')
+    placeholders = ['*', '&', '$']
+    nr_placeholders = len(placeholders)
+    nr_prefixes = len(prefixes)
+    nr_shortcuts = min(nr_placeholders, nr_prefixes)
+    prefixes = prefixes[:nr_shortcuts]
+    short2text = {
+        placeholders[i]:prefixes[i] \
+        for i in range(nr_shortcuts)}
 
     raw_description = schema.text()
     raw_size = sc.llm.nr_tokens(model, raw_description)
@@ -152,7 +167,7 @@ CREATE TABLE lineitem
         split.merge_columns()
         ilpCompression = sc.compress.gurobi.IlpCompression(
             split, llm_name=model, max_depth=2, 
-            context_k=10, short2text={'*':'l_'})
+            context_k=10, short2text=short2text)
         compressed = ilpCompression.compress()
         print(compressed)
         compressed_parts.append(compressed)

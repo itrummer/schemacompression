@@ -47,7 +47,7 @@ class IlpCompression():
         self.max_length = round(2*len(self.true_facts))
         
         self.model = gp.Model('Compression')
-        self.model.Params.TimeLimit = 10*60
+        self.model.Params.TimeLimit = 3*60
         self.decision_vars, self.context_vars, self.fact_vars, \
             self.representation_vars, self.shortcut_vars = self._variables()
         
