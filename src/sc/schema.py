@@ -18,6 +18,8 @@ class Column():
     """ The column data type. """
     annotations: List[str]
     """ All applicable column annotations. """
+    merged: bool
+    """ Whether this is a merged column group. """
     
     def sql(self):
         """ DDL description of column with type. """
@@ -49,7 +51,7 @@ class Table():
             first_col = cols[0]
             group_type = first_col.type
             group_annotations = first_col.annotations
-            new_col = Column(group_name, group_type, group_annotations)
+            new_col = Column(group_name, group_type, group_annotations, True)
             new_columns.append(new_col)
         
         self.columns = new_columns
@@ -131,6 +133,10 @@ class Schema():
         return list(tags)
     
     def get_columns(self):
+        """ Returns list of all columns. """
+        return [c for t in self.tables for c in t.columns]
+    
+    def get_column_names(self):
         """ Returns all column names as list. """
         columns = []
         for table in self.tables:

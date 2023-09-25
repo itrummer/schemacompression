@@ -26,7 +26,6 @@ if __name__ == '__main__':
     model = 'text-davinci-003'
     with open(args.file) as file:
         ddl = file.read()
-
     
     schema_parser = sc.parser.SchemaParser()
     schema = schema_parser.parse(ddl)

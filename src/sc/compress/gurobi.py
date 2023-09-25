@@ -155,6 +155,16 @@ class IlpCompression():
             closing = [ds[')'] for ds in self.decision_vars[:pos+1]]
             self.model.addConstr(gp.quicksum(opening) >= gp.quicksum(closing))
         
+        # Enclose column groups between parentheses
+        merged_cols = [c.name for c in self.schema.get_columns() if c.merged]
+        for pos_1 in range(self.max_length-1):
+            pos_2 = pos_1+1
+            opening_1 = self.decision_vars[pos_1]['(']
+            closing_2 = self.decision_vars[pos_2][')']
+            col_vars = [self.decision_vars[pos_2][c] for c in merged_cols]
+            self.model.addConstr(opening_1 >= gp.quicksum(col_vars))
+            self.model.addConstr(closing_2 >= gp.quicksum(col_vars))
+        
         # Do not select tokens already in context (required for correctness!)
         # Otherwise: selects any token in context after re-activating token.
         for pos in range(self.max_length):
@@ -347,7 +357,7 @@ class IlpCompression():
             self.model.addConstr(gp.quicksum(table_vars) <= 1)
             
             col_vars = []
-            for col in self.schema.get_columns():
+            for col in self.schema.get_column_names():
                 for depth in range(self.max_depth):
                     col_var = self.context_vars[pos][depth][col]
                     col_vars.append(col_var)
@@ -456,7 +466,7 @@ if __name__ == '__main__':
     
     import sc.schema
     logging.basicConfig(level=logging.DEBUG)
-    column = sc.schema.Column('testcolumn', 'testtype', [])
+    column = sc.schema.Column('testcolumn', 'testtype', [], False)
     table = sc.schema.Table('testtable', [column])
     schema = sc.schema.Schema([table], [], [])
     compressor = IlpCompression(schema)

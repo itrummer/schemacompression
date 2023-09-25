@@ -36,7 +36,7 @@ class SchemaParser():
         col_type = str(node.args['kind'])
         annotations = [str(c) for c in node.args['constraints']]
         annotations.append(col_type)
-        return sc.schema.Column(col_name, col_type, annotations)
+        return sc.schema.Column(col_name, col_type, annotations, False)
     
     def _create(self, node):
         """ Handles a create statement.
