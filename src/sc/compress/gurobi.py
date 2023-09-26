@@ -14,12 +14,14 @@ import logging
 import sc.llm
 from gurobipy import GRB
 
+
 class IlpCompression():
     """ Compresses schemata via integer linear programming. """
     
     def __init__(
             self, schema, max_depth=1, llm_name='gpt-3.5-turbo', 
-            upper_bound=None, context_k=5, short2text={}):
+            upper_bound=None, context_k=5, short2text={},
+            timeout_s=5*60):
         """ Initializes for given schema. 
         
         Args:
@@ -29,6 +31,7 @@ class IlpCompression():
             upper_bound: upper bound on cost.
             context_k: consider k most frequent tokens for context.
             short2text: maps candidate shortcuts to text.
+            timeout_s: timeout for optimization in seconds.
         """
         self.schema = schema
         self.max_depth = max_depth
@@ -47,7 +50,7 @@ class IlpCompression():
         self.max_length = round(2*len(self.true_facts))
         
         self.model = gp.Model('Compression')
-        self.model.Params.TimeLimit = 3*60
+        self.model.Params.TimeLimit = timeout_s
         self.decision_vars, self.context_vars, self.fact_vars, \
             self.representation_vars, self.shortcut_vars = self._variables()
         
@@ -57,6 +60,7 @@ class IlpCompression():
         self._add_constraints()
         self._add_pruning()
         self._add_objective()
+        self._add_mips_start()
         print(self.model)
 
     def compress(self):
@@ -290,6 +294,88 @@ class IlpCompression():
                     if short in self.representation_vars[pos][token]:
                         rep_var = self.representation_vars[pos][token][short]
                         self.model.addConstr(rep_var <= short_var)
+
+    def _add_mips_start(self):
+        """ Add naive solution as starting point. """
+        parts = []
+        for table in self.schema.tables:
+            parts += [table.as_predicate()]
+            parts += ['(']
+            for column in table.columns:
+                if column.merged:
+                    for annotation in column.annotations:
+                        parts += [annotation]
+                        parts += ['(']
+                        parts += [column.name]
+                        parts += [')']
+                else:
+                    parts += [column.name]
+                    parts += ['(']
+                    for annotation in column.annotations:
+                        parts += [annotation]
+                    parts += [')']
+            parts += [')']
+        print(f"Naive solution: {' '.join(parts)}")
+
+        for pos in range(self.max_length):
+            for token in self.ids:
+                self.decision_vars[pos][token].Start = 0
+                for depth in range(self.max_depth):
+                    self.context_vars[pos][depth][token].Start = 0
+        
+        tokens_by_pos = []
+        last_pos_tokens = []
+        for part in parts:
+            if part == '(':
+                last_pos_tokens.append('(')
+            elif part == ')':
+                if ')' not in last_pos_tokens:
+                    last_pos_tokens.append(')')
+                else:
+                    tokens_by_pos.append(last_pos_tokens)
+                    last_pos_tokens = [part]
+            else:
+                tokens_by_pos.append(last_pos_tokens)
+                last_pos_tokens = [part]
+        tokens_by_pos.append(last_pos_tokens)
+        tokens_by_pos = tokens_by_pos[1:]
+        
+        for pos, tokens in enumerate(tokens_by_pos):
+            for token in tokens:
+                self.decision_vars[pos][token].Start = 1
+        
+        contexts = [[]]
+        for tokens in tokens_by_pos:
+            last_context = contexts[-1]
+            new_context = last_context.copy()
+            if '(' in tokens:
+                new_context += [tokens[0]]
+            elif ')' in tokens:
+                new_context.pop()
+            contexts += [new_context]
+        print(contexts)
+        
+        for pos, context in enumerate(contexts):
+            for depth, token in enumerate(context):
+                self.context_vars[pos][depth][token].Start = 1
+        #
+        # next_pos = 0
+        # context = []
+        # prior_part = None
+        # for part in parts:
+            # self.decision_vars[next_pos][part].Start = 1
+            # if part not in ['(', ')']:
+                # next_pos += 1
+                #
+            # if part == '(':
+                # context.append(prior_part)
+            # elif part == ')':
+                # context.pop()
+                #
+            # for depth, token in enumerate(context):
+                # self.context_vars[next_pos][depth][token].Start = 1
+                #
+            # prior_part = part
 
     def _add_objective(self):
         """ Add optimization objective. """

@@ -56,7 +56,8 @@ if __name__ == '__main__':
         split.merge_columns()
         ilpCompression = sc.compress.gurobi.IlpCompression(
             split, llm_name=model, max_depth=2, 
-            context_k=10, short2text=short2text)
+            context_k=10, short2text=short2text,
+            timeout_s=1*30)
         compressed = ilpCompression.compress()
         print(compressed)
         compressed_parts.append(compressed)
