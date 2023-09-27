@@ -17,11 +17,32 @@ class SchemaParser():
         self.parser = sqlglot.parser.Parser()
     
     def parse(self, ddl):
-        """ Generates schema description from SQL. """
+        """ Generates schema description from SQL.
+        
+        Args:
+            ddl: SQL commands defining schema (as text).
+        
+        Returns:
+            schema representation for optimizer.
+        """
         tokens = self.tokenizer.tokenize(ddl)
         ast = self.parser.parse(tokens)
         tables = [self._handle(n) for n in ast]
         return sc.schema.Schema(tables, [], [])
+    
+    def format(self, ddl):
+        """ Returns schema with pretty formatting.
+        
+        Args:
+            ddl: SQL commands defining schema (as text).
+        
+        Returns:
+            re-formatted schema as text.
+        """
+        return sqlglot.transpile(ddl, pretty=True)[0]
+        # tokens = self.tokenizer.tokenize(ddl)
+        # ast = self.parser.parse(tokens)
+        # return str(ast)
     
     def _columndef(self, node):
         """ Process column definition.
