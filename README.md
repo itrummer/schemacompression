@@ -17,3 +17,5 @@ export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${GUROBI_HOME}/lib"
 ```
 6. Re-read the changed file: `source .bashrc`.
 7. Check that Gurobi is installed: `gurobi_cl --version`.
+8. Install a license to enable solving large problems. E.g., the experiments used a Gurobi academic license WLS. For this license, download the `gurobi.lic` file and copy it into the home directory of the server executing optimization.
+
