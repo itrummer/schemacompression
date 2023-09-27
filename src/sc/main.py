@@ -4,16 +4,9 @@ Created on Sep 7, 2023
 @author: immanueltrummer
 '''
 import argparse
-import json
-import logging
-import openai
 import sc.parser
 import sc.compress.gurobi
-import sc.compress.types
-import sc.compress.default_types
 import sc.llm
-import sc.schema
-import sc.spider
 
 
 if __name__ == '__main__':
