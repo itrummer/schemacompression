@@ -16,3 +16,4 @@ export PATH="${PATH}:${GUROBI_HOME}/bin"
 export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${GUROBI_HOME}/lib"
 ```
 6. Re-read the changed file: `source .bashrc`.
+7. Check that Gurobi is installed: `gurobi_cl --version`.
