@@ -47,7 +47,8 @@ class IlpCompression():
         
         self.true_facts, self.false_facts = schema.get_facts()
         self.facts = self.true_facts + self.false_facts
-        self.max_length = round(2*len(self.true_facts))
+        self.naive_solution = self._naive_solution()
+        self.max_length = len(self.naive_solution)
         
         self.model = gp.Model('Compression')
         self.model.Params.TimeLimit = timeout_s
@@ -60,7 +61,7 @@ class IlpCompression():
         self._add_constraints()
         self._add_pruning()
         self._add_objective()
-        self._add_mips_start()
+        self._add_mips_start(self.naive_solution)
         print(self.model)
 
     def compress(self):
@@ -120,54 +121,69 @@ class IlpCompression():
             opening = self.decision_vars[pos]['(']
             closing = self.decision_vars[pos][')']
             empty = is_empties[pos]
-            self.model.addConstr(opening + closing + empty <= 1)
+            name = f'P{pos}_OpeningClosingEmpty'
+            self.model.addConstr(opening + closing + empty <= 1, name=name)
 
         # Ensure correct value for emptiness variables
         for pos in range(self.max_length):
             is_empty = is_empties[pos]
             token_vars = [self.decision_vars[pos][t] for t in self.tokens]
-            self.model.addConstr(is_empty >= 1 - gp.quicksum(token_vars))
+            token_sum = gp.quicksum(token_vars)
+            name = f'P{pos}_EmptynessGe'
+            self.model.addConstr(is_empty >= 1 - token_sum, name=name)
             for token_var in token_vars:
-                self.model.addConstr(is_empty <= 1 - token_var)
+                name = f'P{pos}_EmptynessLe'
+                self.model.addConstr(is_empty <= 1 - token_var, name=name)
         
         # Can only have empty slots at the end of description
         for pos_1 in range(self.max_length-1):
             pos_2 = pos_1 + 1
             empty_1 = is_empties[pos_1]
             empty_2 = is_empties[pos_2]
-            self.model.addConstr(empty_1 <= empty_2)
+            name = f'P{pos_1}_EndEmpty'
+            self.model.addConstr(empty_1 <= empty_2, name=name)
             
         # Select at most one ID token per position
         for pos in range(self.max_length):
             token_vars = [self.decision_vars[pos][token] for token in self.ids]
-            self.model.addConstr(gp.quicksum(token_vars) <= 1)
+            name = f'P{pos}_AtMostOneID'
+            self.model.addConstr(gp.quicksum(token_vars) <= 1, name=name)
         
         # Must connect opening parenthesis with token
         for pos in range(self.max_length):
             opening = self.decision_vars[pos]['(']
             token_vars = [self.decision_vars[pos][token] for token in self.ids]
-            self.model.addConstr(opening <= gp.quicksum(token_vars))
+            name = f'P{pos}_OpenWithToken'
+            self.model.addConstr(opening <= gp.quicksum(token_vars), name=name)
             
         # Balance opening and closing parentheses
         opening = [decisions['('] for decisions in self.decision_vars]
         closing = [decisions[')'] for decisions in self.decision_vars]
-        self.model.addConstr(gp.quicksum(opening) == gp.quicksum(closing))
+        opening_sum = gp.quicksum(opening)
+        closing_sum = gp.quicksum(closing)
+        name = f'BalanceOpeningAndClosingParentheses'
+        self.model.addConstr(opening_sum == closing_sum, name=name)
         
         # Never more closing than opening parenthesis!
         for pos in range(self.max_length):
             opening = [ds['('] for ds in self.decision_vars[:pos+1]]
             closing = [ds[')'] for ds in self.decision_vars[:pos+1]]
-            self.model.addConstr(gp.quicksum(opening) >= gp.quicksum(closing))
+            opening_sum = gp.quicksum(opening)
+            closing_sum = gp.quicksum(closing)
+            name = f'P{pos}_NoMoreClosingThanOpeningParentheses'
+            self.model.addConstr(opening_sum >= closing_sum, name=name)
         
         # Enclose column groups between parentheses
-        merged_cols = [c.name for c in self.schema.get_columns() if c.merged]
-        for pos_1 in range(self.max_length-1):
-            pos_2 = pos_1+1
-            opening_1 = self.decision_vars[pos_1]['(']
-            closing_2 = self.decision_vars[pos_2][')']
-            col_vars = [self.decision_vars[pos_2][c] for c in merged_cols]
-            self.model.addConstr(opening_1 >= gp.quicksum(col_vars))
-            self.model.addConstr(closing_2 >= gp.quicksum(col_vars))
+        # merged_cols = [c.name for c in self.schema.get_columns() if c.merged]
+        # for pos_1 in range(self.max_length-1):
+            # pos_2 = pos_1+1
+            # opening_1 = self.decision_vars[pos_1]['(']
+            # closing_2 = self.decision_vars[pos_2][')']
+            # col_vars = [self.decision_vars[pos_2][c] for c in merged_cols]
+            # name = f'P{pos_1}_NeedOpeningBeforeColumnGroup'
+            # self.model.addConstr(opening_1 >= gp.quicksum(col_vars), name=name)
+            # name = f'P{pos_1}_NeedClosingAfterColumnGroup'
+            # self.model.addConstr(closing_2 >= gp.quicksum(col_vars), name=name)
         
         # Do not select tokens already in context (required for correctness!)
         # Otherwise: selects any token in context after re-activating token.
@@ -177,14 +193,18 @@ class IlpCompression():
                 for depth in range(self.max_depth):
                     context_var = self.context_vars[pos][depth][token]
                     context_vars.append(context_var)
+                ctx_sum = gp.quicksum(context_vars)
                 decision_var = self.decision_vars[pos][token]
-                self.model.addConstr(gp.quicksum(context_vars) + decision_var <= 1)
+                name = f'P{pos}_{token[:200]}_NoContextOverlap'
+                self.model.addConstr(ctx_sum + decision_var <= 1, name=name)
             
         # Each context layer fixes at most one token
         for pos in range(self.max_length):
             for depth in range(self.max_depth):
-                self.model.addConstr(
-                    gp.quicksum(self.context_vars[pos][depth].values()) <= 1)
+                name = f'P{pos}_D{depth}_OneTokenPerContextLayer'
+                cur_context_vars = self.context_vars[pos][depth].values()
+                context_sum = gp.quicksum(cur_context_vars)
+                self.model.addConstr(context_sum <= 1, name=name)
                     
         # Context layers are used consecutively
         for pos in range(self.max_length):
@@ -192,7 +212,8 @@ class IlpCompression():
                 depth_2 = depth_1 + 1
                 sum_1 = gp.quicksum(self.context_vars[pos][depth_1].values())
                 sum_2 = gp.quicksum(self.context_vars[pos][depth_2].values())
-                self.model.addConstr(sum_1 >= sum_2)
+                name = f'P{pos}_D{depth_1}_ConsecutiveContext'
+                self.model.addConstr(sum_1 >= sum_2, name=name)
         
         # Collect all context variables per position
         context_by_pos = []
@@ -203,7 +224,8 @@ class IlpCompression():
             context_by_pos.append(pos_vars)
         
         # Initial context is empty
-        self.model.addConstr(gp.quicksum(context_by_pos[0]) == 0)
+        name = f'NoInitialContext'
+        self.model.addConstr(gp.quicksum(context_by_pos[0]) == 0, name=name)
         
         # Ensure correct number of context tokens
         for pos_1 in range(self.max_length-1):
@@ -212,7 +234,8 @@ class IlpCompression():
             sum_2 = gp.quicksum(context_by_pos[pos_2])
             opening = self.decision_vars[pos_1]['(']
             closing = self.decision_vars[pos_1][')']
-            self.model.addConstr(sum_1 + opening - closing == sum_2)
+            name = f'P{pos_1}_NrContextTokens'
+            self.model.addConstr(sum_1 + opening - closing == sum_2, name=name)
         
         # Create activation variables
         activations = []
@@ -223,9 +246,13 @@ class IlpCompression():
                 token_var = self.decision_vars[pos][token]
                 name = f'Activate_P{pos}_{token[:200]}'
                 activation = self.model.addVar(vtype=GRB.BINARY, name=name)
-                self.model.addConstr(activation <= opening)
-                self.model.addConstr(activation <= token_var)
-                self.model.addConstr(activation >= opening + token_var - 1)
+                name = f'P{pos}_{token[:200]}_ActivationRequiresOpening'
+                self.model.addConstr(activation <= opening, name=name)
+                name = f'P{pos}_{token[:200]}_ActivationRequiresToken'
+                self.model.addConstr(activation <= token_var, name=name)
+                name = f'P{pos}_{token[:200]}_MustActivateIfOpeningAndToken'
+                activation_lb = opening + token_var - 1
+                self.model.addConstr(activation >= activation_lb, name=name)
                 cur_activations[token] = activation
             activations.append(cur_activations)
         
@@ -237,7 +264,9 @@ class IlpCompression():
                 token_vars = [
                     self.context_vars[pos_2][d][token]
                     for d in range(self.max_depth)]
-                self.model.addConstr(gp.quicksum(token_vars) >= activation_var)
+                name = f'P{pos_1}_{token[:200]}_SetContextAfterActivation'
+                token_sum = gp.quicksum(token_vars)
+                self.model.addConstr(token_sum >= activation_var, name=name)
         
         # Restrict context changes, compared to prior context
         for pos_1 in range(self.max_length-1):
@@ -248,8 +277,10 @@ class IlpCompression():
                 for token in self.ids:
                     var_1 = self.context_vars[pos_1][depth][token]
                     var_2 = self.context_vars[pos_2][depth][token]
-                    self.model.addConstr(var_2 >= var_1 - closing)
-                    self.model.addConstr(var_2 <= var_1 + opening)
+                    name = f'P{pos_1}_D{depth}_CannotDropContextWithoutClosing'
+                    self.model.addConstr(var_2 >= var_1 - closing, name=name)
+                    name = f'P{pos_1}_D{depth}_CannotAddContextWithoutOpening'
+                    self.model.addConstr(var_2 <= var_1 + opening, name=name)
         
         # Link facts to nested tokens
         for fact_key in self.fact_vars.keys():
@@ -264,28 +295,35 @@ class IlpCompression():
                     
             fact_key = frozenset({token_1, token_2})
             fact_var = self.fact_vars[fact_key]
-            self.model.addConstr(fact_var <= gp.quicksum(mention_vars))
-            for mention_var in mention_vars:
-                self.model.addConstr(fact_var >= mention_var)
+            mention_sum = gp.quicksum(mention_vars)
+            name = f'F{token_1[:100]}_{token_2[:100]}_NoFactUntilMentioned'
+            self.model.addConstr(fact_var <= mention_sum, name=name)
+            for var_idx, mention_var in enumerate(mention_vars):
+                name = f'F{token_1[:100]}_{token_2[:100]}_{var_idx}_MentionImpliesFact'
+                self.model.addConstr(fact_var >= mention_var, name=name)
         
         # Make sure that true facts are mentioned
         for token_1, token_2 in self.true_facts:
             fact_key = frozenset({token_1, token_2})
             fact_var = self.fact_vars[fact_key]
-            self.model.addConstr(fact_var == 1)
+            name = f'DefinitelyMention_{token_1[:100]}_{token_2[:100]}'
+            self.model.addConstr(fact_var == 1, name=name)
         
         # Ensure that wrong facts are not mentioned
         for token_1, token_2 in self.false_facts:
             fact_key = frozenset({token_1, token_2})
             fact_var = self.fact_vars[fact_key]
-            self.model.addConstr(fact_var == 0)
+            name = f'NeverMention_{token_1[:100]}_{token_2[:100]}'
+            self.model.addConstr(fact_var == 0, name=name)
         
         # Select exactly one representation for selected token
         for pos in range(self.max_length):
             for token in self.ids:
                 decision_var = self.decision_vars[pos][token]
                 rep_vars = self.representation_vars[pos][token].values()
-                self.model.addConstr(gp.quicksum(rep_vars) == decision_var)
+                rep_sum = gp.quicksum(rep_vars)
+                name = f'P{pos}_{token[:200]}_OneRepresentationForSelected'
+                self.model.addConstr(rep_sum == decision_var, name=name)
                 
         # Need to introduce used shortcuts
         for short, short_var in self.shortcut_vars.items():
@@ -293,59 +331,35 @@ class IlpCompression():
                 for token in self.ids:
                     if short in self.representation_vars[pos][token]:
                         rep_var = self.representation_vars[pos][token][short]
-                        self.model.addConstr(rep_var <= short_var)
+                        name = f'P{pos}_{token[:200]}_{short}_NeedShortcutForRep'
+                        self.model.addConstr(rep_var <= short_var, name=name)
 
-    def _add_mips_start(self):
-        """ Add naive solution as starting point. """
-        parts = []
-        for table in self.schema.tables:
-            parts += [table.as_predicate()]
-            parts += ['(']
-            for column in table.columns:
-                if column.merged:
-                    for annotation in column.annotations:
-                        parts += [annotation]
-                        parts += ['(']
-                        parts += [column.name]
-                        parts += [')']
-                else:
-                    parts += [column.name]
-                    parts += ['(']
-                    for annotation in column.annotations:
-                        parts += [annotation]
-                    parts += [')']
-            parts += [')']
-        print(f"Naive solution: {' '.join(parts)}")
-
+    def _add_mips_start(self, solution):
+        """ Add naive solution as starting point (assumes no shortcuts).
+        
+        Args:
+            solution: list with one entry per position (token list).
+        """
+        # Set all variables to zero by default
         for pos in range(self.max_length):
             for token in self.ids:
                 self.decision_vars[pos][token].Start = 0
+                for rep_var in self.representation_vars[pos][token].values():
+                    rep_var.Start = 0
                 for depth in range(self.max_depth):
                     self.context_vars[pos][depth][token].Start = 0
         
-        tokens_by_pos = []
-        last_pos_tokens = []
-        for part in parts:
-            if part == '(':
-                last_pos_tokens.append('(')
-            elif part == ')':
-                if ')' not in last_pos_tokens:
-                    last_pos_tokens.append(')')
-                else:
-                    tokens_by_pos.append(last_pos_tokens)
-                    last_pos_tokens = [part]
-            else:
-                tokens_by_pos.append(last_pos_tokens)
-                last_pos_tokens = [part]
-        tokens_by_pos.append(last_pos_tokens)
-        tokens_by_pos = tokens_by_pos[1:]
-        
-        for pos, tokens in enumerate(tokens_by_pos):
+        # Select tokens that appear in solution
+        for pos, tokens in enumerate(solution):
             for token in tokens:
                 self.decision_vars[pos][token].Start = 1
+                # Assumption: given solution does not use shortcuts
+                if token not in ['(', ')']:
+                    self.representation_vars[pos][token][''].Start = 1
         
+        # Create sequence of contexts
         contexts = [[]]
-        for tokens in tokens_by_pos:
+        for tokens in solution:
             last_context = contexts[-1]
             new_context = last_context.copy()
             if '(' in tokens:
@@ -353,29 +367,11 @@ class IlpCompression():
             elif ')' in tokens:
                 new_context.pop()
             contexts += [new_context]
-        print(contexts)
         
+        # Set context tokens that appear in solution
         for pos, context in enumerate(contexts):
             for depth, token in enumerate(context):
                 self.context_vars[pos][depth][token].Start = 1
-        #
-        # next_pos = 0
-        # context = []
-        # prior_part = None
-        # for part in parts:
-            # self.decision_vars[next_pos][part].Start = 1
-            # if part not in ['(', ')']:
-                # next_pos += 1
-                #
-            # if part == '(':
-                # context.append(prior_part)
-            # elif part == ')':
-                # context.pop()
-                #
-            # for depth, token in enumerate(context):
-                # self.context_vars[next_pos][depth][token].Start = 1
-                #
-            # prior_part = part
 
     def _add_objective(self):
         """ Add optimization objective. """
@@ -411,7 +407,9 @@ class IlpCompression():
         
         # Set upper cost bound if available
         if self.upper_bound is not None:
-            self.model.addConstr(gp.quicksum(terms) <= self.upper_bound)
+            cost = gp.quicksum(terms)
+            name = 'UpperBoundOnCost'
+            self.model.addConstr(cost <= self.upper_bound, name=name)
     
     def _add_pruning(self):
         """ Add constraints to restrict search space size. """
@@ -430,7 +428,9 @@ class IlpCompression():
                 if token not in common_ids:
                     for pos in range(self.max_length):
                         context_var = self.context_vars[pos][depth][token]
-                        self.model.addConstr(context_var == 0)
+                        context_var.VarHintVal = 0
+                        # name = f'P{pos}_D{depth}_{token}_isZero'
+                        # self.model.addConstr(context_var == 0, name=name)
         
         # Avoid nesting mutually exclusive facts
         for pos in range(self.max_length):
@@ -440,19 +440,25 @@ class IlpCompression():
                     pred = table.as_predicate()
                     table_var = self.context_vars[pos][depth][pred]
                     table_vars.append(table_var)
-            self.model.addConstr(gp.quicksum(table_vars) <= 1)
+            name = f'P{pos}_AtMostOneTableInContext'
+            self.model.addConstr(gp.quicksum(table_vars) <= 1, name=name)
             
             col_vars = []
             for col in self.schema.get_column_names():
                 for depth in range(self.max_depth):
                     col_var = self.context_vars[pos][depth][col]
                     col_vars.append(col_var)
-            self.model.addConstr(gp.quicksum(col_vars) <= 1)        
+            name = f'P{pos}_AtMostOneColumnInContext'
+            self.model.addConstr(gp.quicksum(col_vars) <= 1, name=name)
         
         # Start with description of table columns
         first_table_pred = self.schema.tables[0].as_predicate()
-        self.model.addConstr(self.decision_vars[0][first_table_pred] == 1)
-        self.model.addConstr(self.decision_vars[0]['('] == 1)
+        first_table_var = self.decision_vars[0][first_table_pred]
+        name = 'StartWithTablePredicate'
+        self.model.addConstr(first_table_var == 1, name=name)
+        name = 'StartWithOpeningParenthesis'
+        first_opening_var = self.decision_vars[0]['(']
+        self.model.addConstr(first_opening_var == 1, name=name)
     
     def _get_mention_var(self, outer_token, inner_token, pos):
         """ Generate variable representing fact mention.
@@ -467,11 +473,57 @@ class IlpCompression():
         inner_var = self.decision_vars[pos][inner_token]
         name = f'Mention_P{pos}_{outer_token[:100]}_{inner_token[:100]}'
         mention_var = self.model.addVar(vtype=GRB.BINARY, name=name)
-        self.model.addConstr(mention_var <= gp.quicksum(outer_vars))
-        self.model.addConstr(mention_var <= inner_var)
-        self.model.addConstr(
-            mention_var >= -1 + gp.quicksum(outer_vars) + inner_var)
+        name = f'P{pos}_{outer_token[:100]}_{inner_token[:100]}_MentionRequiresOuter'
+        self.model.addConstr(mention_var <= gp.quicksum(outer_vars), name=name)
+        name = f'P{pos}_{outer_token[:100]}_{inner_token[:100]}_MentionRequiresInner'
+        self.model.addConstr(mention_var <= inner_var, name=name)
+        name = f'P{pos}_{outer_token[:100]}_{inner_token[:100]}_OuterAndInnerImplesMention'
+        lb_mention_var = -1 + gp.quicksum(outer_vars) + inner_var
+        self.model.addConstr(mention_var >= lb_mention_var, name=name)
         return mention_var
+    
+    def _naive_solution(self):
+        """ Generate a naive solution.
+        
+        Returns:
+            List of activated tokens per position.
+        """
+        parts = []
+        for table in self.schema.tables:
+            parts += [table.as_predicate()]
+            parts += ['(']
+            for column in table.columns:
+                # if column.merged:
+                # for annotation in column.annotations:
+                    # parts += [annotation]
+                    # parts += ['(']
+                    # parts += [column.name]
+                    # parts += [')']
+                # else:
+                    parts += [column.name]
+                    parts += ['(']
+                    for annotation in column.annotations:
+                        parts += [annotation]
+                    parts += [')']
+            parts += [')']
+        
+        tokens_by_pos = []
+        last_pos_tokens = []
+        for part in parts:
+            if part == '(':
+                last_pos_tokens.append('(')
+            elif part == ')':
+                if ')' not in last_pos_tokens:
+                    last_pos_tokens.append(')')
+                else:
+                    tokens_by_pos.append(last_pos_tokens)
+                    last_pos_tokens = [part]
+            else:
+                tokens_by_pos.append(last_pos_tokens)
+                last_pos_tokens = [part]
+        tokens_by_pos.append(last_pos_tokens)
+        tokens_by_pos = tokens_by_pos[1:]
+        return tokens_by_pos
     
     def _variables(self):
         """ Returns variables for input schema. 

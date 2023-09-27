@@ -29,16 +29,6 @@ if __name__ == '__main__':
     
     schema_parser = sc.parser.SchemaParser()
     schema = schema_parser.parse(ddl)
-    prefixes = schema.prefixes(model)
-    print(f'Sorted prefixes: {prefixes}')
-    placeholders = ['*', '&', '$']
-    nr_placeholders = len(placeholders)
-    nr_prefixes = len(prefixes)
-    nr_shortcuts = min(nr_placeholders, nr_prefixes)
-    prefixes = prefixes[:nr_shortcuts]
-    short2text = {
-        placeholders[i]:prefixes[i] \
-        for i in range(nr_shortcuts)}
 
     raw_description = schema.text()
     raw_size = sc.llm.nr_tokens(model, raw_description)
@@ -53,17 +43,42 @@ if __name__ == '__main__':
     compressed_parts = []
     splits = schema.split()
     for split in splits:
+        
+        prefixes = split.prefixes(model)
+        print(f'Sorted prefixes: {prefixes}')
+        placeholders = ['PA', 'PB', 'PC', 'PD', 'PE', 'PF', 'PG', 'PH', 'PI']
+        nr_placeholders = len(placeholders)
+        nr_prefixes = len(prefixes)
+        nr_shortcuts = min(nr_placeholders, nr_prefixes)
+        prefixes = prefixes[:nr_shortcuts]
+        short2text = {
+            placeholders[i]:prefixes[i] \
+            for i in range(nr_shortcuts)}
+
+        uncompressed = split.text()
         split.merge_columns()
         ilpCompression = sc.compress.gurobi.IlpCompression(
-            split, llm_name=model, max_depth=2, 
+            split, llm_name=model, max_depth=3, 
             context_k=10, short2text=short2text,
-            timeout_s=1*30)
+            timeout_s=3*60)
         compressed = ilpCompression.compress()
+        print('Uncompressed:')
+        print(uncompressed)
+        print(f'Length: {sc.llm.nr_tokens(model, uncompressed)}')
+        print('Compressed:')
         print(compressed)
+        print(f'Length: {sc.llm.nr_tokens(model, compressed)}')
         compressed_parts.append(compressed)
+        
+    all_compressed = '\n'.join(compressed_parts)
+    
+    # ilpCompression = sc.compress.gurobi.IlpCompression(
+            # schema, llm_name=model, max_depth=2, 
+            # context_k=10, short2text=short2text,
+            # timeout_s=5*60)
+    # all_compressed = ilpCompression.compress()
     
     print(f'Original\n{raw_description}')
-    all_compressed = '\n'.join(compressed_parts)
     print(f'Compressed\n{all_compressed}')
     
     #compressed_size = min(compressed_1_size, compressed_2_size)

@@ -46,12 +46,16 @@ class Table():
         
         new_columns = []
         for col_key, cols in key2cols.items():
+            group_size = len(cols)
             names = [c.name for c in cols]
             group_name = ' '.join(names)
+            if group_size > 1:
+                group_name = f'[{group_name}]'
             first_col = cols[0]
             group_type = first_col.type
             group_annotations = first_col.annotations
-            new_col = Column(group_name, group_type, group_annotations, True)
+            merged = True if group_size > 1 else False
+            new_col = Column(group_name, group_type, group_annotations, merged)
             new_columns.append(new_col)
         
         self.columns = new_columns
@@ -314,8 +318,8 @@ class Schema():
             self._count_prefixes(counter, table.name)
             for column in table.columns:
                 self._count_prefixes(counter, column.name)
-                # for annotation in column.annotations:
-                    # self._count_prefixes(counter, annotation)
+                for annotation in column.annotations:
+                    self._count_prefixes(counter, annotation)
         
         return counter
     
