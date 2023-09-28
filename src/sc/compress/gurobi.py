@@ -11,6 +11,7 @@ Created on Sep 13, 2023
 import collections
 import gurobipy as gp
 import logging
+import sc.compress.greedy
 import sc.llm
 from dataclasses import dataclass
 from gurobipy import GRB
@@ -37,8 +38,7 @@ class IlpCompression():
     
     def __init__(
             self, schema, max_depth=1, llm_name='gpt-3.5-turbo', 
-            upper_bound=None, context_k=5, short2text={},
-            timeout_s=5*60):
+            upper_bound=None, context_k=5, timeout_s=5*60):
         """ Initializes for given schema. 
         
         Args:
@@ -47,7 +47,6 @@ class IlpCompression():
             llm_name: name of LLM to use.
             upper_bound: upper bound on cost.
             context_k: consider k most frequent tokens for context.
-            short2text: maps candidate shortcuts to text.
             timeout_s: timeout for optimization in seconds.
         """
         self.schema = schema
@@ -55,7 +54,9 @@ class IlpCompression():
         self.llm_name = llm_name
         self.upper_bound = upper_bound
         self.context_k = context_k
-        self.short2text = short2text
+        # Important: generate candidates before merging columns!
+        self.short2text = self._shortcut_candidates(schema, llm_name)
+        self.schema.merge_columns()
         self.ids = schema.get_identifiers()
         self.tokens = self.ids + ['(', ')']
         self.timeout_s = timeout_s        
@@ -84,7 +85,16 @@ class IlpCompression():
                 self._add_objective(model, all_vars)
                 self._add_mips_start(self.naive_solution, all_vars)
                 model.optimize()
-                return self._extract_solution(all_vars)
+                solution = self._extract_solution(all_vars)
+                nr_variables = model.NumVars
+                nr_constraints = model.NumConstrs
+                mip_gap = model.MIPGap                
+                result = {
+                    'solution':solution, 'nr_variables':nr_variables, 
+                    'nr_constraints':nr_constraints, 'mip_gap':mip_gap,
+                    'max_length':self.max_length, 'max_depth':self.max_depth,
+                    'timeout_s':self.timeout_s, 'context_k':self.context_k}
+                return result
 
     def _add_constraints(self, model, cvars):
         """ Adds constraints to internal model.
@@ -531,25 +541,7 @@ class IlpCompression():
         Returns:
             List of activated tokens per position.
         """
-        parts = []
-        for table in self.schema.tables:
-            parts += [table.as_predicate()]
-            parts += ['(']
-            for column in table.columns:
-                # if column.merged:
-                # for annotation in column.annotations:
-                    # parts += [annotation]
-                    # parts += ['(']
-                    # parts += [column.name]
-                    # parts += [')']
-                # else:
-                    parts += [column.name]
-                    parts += ['(']
-                    for annotation in column.annotations:
-                        parts += [annotation]
-                    parts += [')']
-            parts += [')']
-        
+        parts = sc.compress.greedy.greedy_parts(self.schema)
         tokens_by_pos = []
         last_pos_tokens = []
         for part in parts:
@@ -568,6 +560,24 @@ class IlpCompression():
         tokens_by_pos = tokens_by_pos[1:]
         return tokens_by_pos
     
+    def _shortcut_candidates(self, schema, model):
+        """ Generate candidates for shortcuts.
+        
+        Args:
+            schema: generate shortcuts for this schema.
+            model: count tokens for this model.
+        
+        Returns:
+            dictionary mapping candidate shortcuts to their text.
+        """
+        prefixes = schema.prefixes(model)
+        placeholders = ['PA', 'PB', 'PC', 'PD', 'PE', 'PF', 'PG', 'PH', 'PI']
+        nr_placeholders = len(placeholders)
+        nr_prefixes = len(prefixes)
+        nr_shortcuts = min(nr_placeholders, nr_prefixes)
+        prefixes = prefixes[:nr_shortcuts]
+        return {placeholders[i]:prefixes[i] for i in range(nr_shortcuts)}
+
     def _variables(self, model):
         """ Returns variables for input schema. 
         
