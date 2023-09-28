@@ -32,7 +32,7 @@ def benchmark(ddl, solver, model, timeout_s):
     return result
 
 
-def solver_greedy(ddl, _, _):
+def solver_greedy(ddl, *args):
     """ Compress input schema greedily.
     
     Args:
@@ -68,7 +68,7 @@ def solver_gurobi(ddl, model, timeout_s):
     return ilpCompression.compress()
 
 
-def solver_pretty(ddl, _, _):
+def solver_pretty(ddl, *args):
     """ Pretty formating of DDL SQL commands.
     
     Args:
@@ -82,7 +82,7 @@ def solver_pretty(ddl, _, _):
     return {'solution':solution}
 
 
-def solver_promptbase(ddl, _, _):
+def solver_promptbase(ddl, *args):
     """ Use prompt proposed at promptbase.com.
     
     This corresponds to the schema description used
