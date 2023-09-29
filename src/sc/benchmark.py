@@ -108,19 +108,21 @@ def read_schemata(input_path):
         input_path: path to input directory.
     
     Returns:
-        list of schema descriptions in SQL.
+        tuple: list of file names and list of schema descriptions.
     """
+    file_names = []
     ddls = []
     input_dir = pathlib.Path(input_path)
     for file_name in input_dir.iterdir():
         if str(file_name).endswith('.sql'):
             file_path = input_dir.joinpath(file_name)
             print(f'Reading file {file_path} ...')
+            file_names.append(file_name)
             with open(file_path) as file:
                 ddl = file.read()
                 ddls.append(ddl)
     
-    return ddls
+    return file_names, ddls
 
 
 if __name__ == '__main__':
@@ -133,19 +135,20 @@ if __name__ == '__main__':
     
     model = 'text-davinci-003'
     
-    ddls = read_schemata(args.inputdir)
+    file_names, ddls = read_schemata(args.inputdir)
     nr_ddls = len(ddls)
     print(f'Read {nr_ddls} schemata.')
     
     results = []
-    for ddl in ddls:
+    for file_name, ddl in zip(file_names, ddls):
         greedy_result = benchmark(ddl, solver_greedy, model, args.timeout_s)
         gurobi_result = benchmark(ddl, solver_gurobi, model, args.timeout_s)
         pretty_result = benchmark(ddl, solver_pretty, model, args.timeout_s)
         prompt_result = benchmark(ddl, solver_promptbase, model, args.timeout_s)
         result = {
-            'greedy':greedy_result, 'gurobi':gurobi_result, 
-            'pretty':pretty_result, 'prompt':prompt_result}
+            'file_name':file_name, 'greedy':greedy_result, 
+            'gurobi':gurobi_result, 'pretty':pretty_result, 
+            'prompt':prompt_result}
         results.append(result)
         
         with open(args.outpath, 'w') as file:
