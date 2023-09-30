@@ -117,7 +117,7 @@ def read_schemata(input_path):
         if str(file_name).endswith('.sql'):
             file_path = input_dir.joinpath(file_name)
             print(f'Reading file {file_path} ...')
-            file_names.append(file_name)
+            file_names.append(str(file_name))
             with open(file_path) as file:
                 ddl = file.read()
                 ddls.append(ddl)
