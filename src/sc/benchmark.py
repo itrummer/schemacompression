@@ -160,8 +160,8 @@ if __name__ == '__main__':
         greedy_result = benchmark(ddl, solver_greedy)
         gurobi_args = {
             'llm_name':model, 'timeout_s':args.timeout_s, 
-            'start':not args.start, 'hints':not args.hints, 
-            'merge':not args.merge}
+            'start':not args.nostart, 'hints':not args.nohints, 
+            'merge':not args.nomerge}
         gurobi_result = benchmark(ddl, solver_gurobi, **gurobi_args)
         pretty_result = benchmark(ddl, solver_pretty)
         prompt_result = benchmark(ddl, solver_promptbase)
