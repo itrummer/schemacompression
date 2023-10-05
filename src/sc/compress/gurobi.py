@@ -400,7 +400,7 @@ class IlpCompression():
         # Count space for introducing shortcuts
         for short, short_text in self.short2text.items():
             short_var = cvars.shortcut_vars[short]
-            intro_text = f'{short} substitutes {short_text} '
+            intro_text = f'{short} means {short_text} '
             weight = sc.llm.nr_tokens(self.llm_name, intro_text)
             terms.append(weight * short_var)
         
