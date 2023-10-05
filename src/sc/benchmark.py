@@ -156,14 +156,14 @@ if __name__ == '__main__':
     
     results = []
     for file_name, ddl in zip(file_names, ddls):
-        greedy_result = benchmark(ddl, solver_greedy, {})
+        greedy_result = benchmark(ddl, solver_greedy)
         gurobi_args = {
             'llm_name':model, 'timeout_s':args.timeout_s, 
             'start':args.start, 'hints':args.hints, 
             'merge':args.merge}
-        gurobi_result = benchmark(ddl, solver_gurobi, gurobi_args)
-        pretty_result = benchmark(ddl, solver_pretty, {})
-        prompt_result = benchmark(ddl, solver_promptbase, {})
+        gurobi_result = benchmark(ddl, solver_gurobi, **gurobi_args)
+        pretty_result = benchmark(ddl, solver_pretty)
+        prompt_result = benchmark(ddl, solver_promptbase)
         result = {
             'file_name':file_name, 'greedy':greedy_result, 
             'gurobi':gurobi_result, 'pretty':pretty_result, 
