@@ -22,12 +22,21 @@ def benchmark(ddl, solver, **kwargs):
         kwargs: keyword arguments for solver.
     """
     start_s = time.time()
-    result = solver(ddl, **kwargs)
+    try:
+        result = solver(ddl, **kwargs)
+        error = False
+    except:
+        error = True
+    
     total_s = time.time() - start_s
     result['total_s'] = total_s
-    solution = result['solution']
-    size = sc.llm.nr_tokens(model, solution)
-    result['size'] = size
+    result['error'] = error
+    
+    if not error:
+        solution = result['solution']
+        size = sc.llm.nr_tokens(model, solution)
+        result['size'] = size
+    
     return result
 
 
