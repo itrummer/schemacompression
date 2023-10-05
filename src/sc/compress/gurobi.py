@@ -37,21 +37,21 @@ class IlpCompression():
     """ Compresses schemata via integer linear programming. """
     
     def __init__(
-            self, schema, max_depth=1, llm_name='gpt-3.5-turbo', 
-            upper_bound=None, context_k=5, timeout_s=5*60,
-            start, hints, merge):
+            self, schema, start, hints, merge, 
+            max_depth=1, llm_name='gpt-3.5-turbo', 
+            upper_bound=None, context_k=5, timeout_s=5*60):
         """ Initializes for given schema. 
         
         Args:
             schema: a schema to compress.
+            start: whether to use greedy MIPS start.
+            hints: whether to use value hints for variables.
+            merge: whether to merge columns with same annotations.
             max_depth: maximal context depth.
             llm_name: name of LLM to use.
             upper_bound: upper bound on cost.
             context_k: consider k most frequent tokens for context.
             timeout_s: timeout for optimization in seconds.
-            start: whether to use greedy MIPS start.
-            hints: whether to use value hints for variables.
-            merge: whether to merge columns with same annotations.
         """
         self.schema = schema
         self.max_depth = max_depth
