@@ -138,13 +138,13 @@ if __name__ == '__main__':
     parser.add_argument('timeout_s', type=int, help='Timeout seconds per test')
     parser.add_argument('outpath', type=str, help='Path to output file')
     parser.add_argument(
-        '--start', type=bool, default=True, 
+        '--nostart', action='store_false', 
         help='Greedy solution as start')
     parser.add_argument(
-        '--hints', type=bool, default=True, 
+        '--nohints', action='store_false', 
         help='Hints for variable values')
     parser.add_argument(
-        '--merge', type=bool, default=True, 
+        '--nomerge', action='store_false', 
         help='Merge columns by annotations')
     args = parser.parse_args()
     print(args)
@@ -160,8 +160,8 @@ if __name__ == '__main__':
         greedy_result = benchmark(ddl, solver_greedy)
         gurobi_args = {
             'llm_name':model, 'timeout_s':args.timeout_s, 
-            'start':args.start, 'hints':args.hints, 
-            'merge':args.merge}
+            'start':not args.start, 'hints':not args.hints, 
+            'merge':not args.merge}
         gurobi_result = benchmark(ddl, solver_gurobi, **gurobi_args)
         pretty_result = benchmark(ddl, solver_pretty)
         prompt_result = benchmark(ddl, solver_promptbase)
