@@ -138,13 +138,13 @@ if __name__ == '__main__':
     parser.add_argument('timeout_s', type=int, help='Timeout seconds per test')
     parser.add_argument('outpath', type=str, help='Path to output file')
     parser.add_argument(
-        '--nostart', action='store_false', 
+        '--nostart', action='store_true', 
         help='Greedy solution as start')
     parser.add_argument(
-        '--nohints', action='store_false', 
+        '--nohints', action='store_true', 
         help='Hints for variable values')
     parser.add_argument(
-        '--nomerge', action='store_false', 
+        '--nomerge', action='store_true', 
         help='Merge columns by annotations')
     args = parser.parse_args()
     print(args)
