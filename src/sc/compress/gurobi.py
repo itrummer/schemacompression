@@ -38,7 +38,8 @@ class IlpCompression():
     
     def __init__(
             self, schema, max_depth=1, llm_name='gpt-3.5-turbo', 
-            upper_bound=None, context_k=5, timeout_s=5*60):
+            upper_bound=None, context_k=5, timeout_s=5*60,
+            start, hints, merge):
         """ Initializes for given schema. 
         
         Args:
@@ -48,6 +49,9 @@ class IlpCompression():
             upper_bound: upper bound on cost.
             context_k: consider k most frequent tokens for context.
             timeout_s: timeout for optimization in seconds.
+            start: whether to use greedy MIPS start.
+            hints: whether to use value hints for variables.
+            merge: whether to merge columns with same annotations.
         """
         self.schema = schema
         self.max_depth = max_depth
@@ -56,10 +60,14 @@ class IlpCompression():
         self.context_k = context_k
         # Important: generate candidates before merging columns!
         self.short2text = self._shortcut_candidates(schema, llm_name)
-        self.schema.merge_columns()
+        if merge:
+            self.schema.merge_columns()
         self.ids = schema.get_identifiers()
         self.tokens = self.ids + ['(', ')']
-        self.timeout_s = timeout_s        
+        self.timeout_s = timeout_s
+        self.start = start
+        self.hints = hints
+        self.merge = merge
         logging.debug(f'IDs: {self.ids}')
         logging.debug(f'Tokens: {self.tokens}')
         
@@ -83,7 +91,10 @@ class IlpCompression():
                 self._add_constraints(model, all_vars)
                 self._add_pruning(model, all_vars)
                 self._add_objective(model, all_vars)
-                self._add_mips_start(self.naive_solution, all_vars)
+                if self.hints:
+                    self._add_hints(all_vars)
+                if self.start:
+                    self._add_mips_start(self.naive_solution, all_vars)
                 model.optimize()
                 solution = self._extract_solution(all_vars)
                 nr_variables = model.NumVars
@@ -93,7 +104,8 @@ class IlpCompression():
                     'solution':solution, 'nr_variables':nr_variables, 
                     'nr_constraints':nr_constraints, 'mip_gap':mip_gap,
                     'max_length':self.max_length, 'max_depth':self.max_depth,
-                    'timeout_s':self.timeout_s, 'context_k':self.context_k}
+                    'timeout_s':self.timeout_s, 'context_k':self.context_k,
+                    'start':self.start, 'hints':self.hints, 'merge':self.merge}
                 return result
 
     def _add_constraints(self, model, cvars):
@@ -330,6 +342,28 @@ class IlpCompression():
                         name = f'P{pos}_{token[:200]}_{short}_NeedShortcutForRep'
                         model.addConstr(rep_var <= short_var, name=name)
 
+    def _add_hints(self, cvars):
+        """ Add hints about variable values.
+        
+        Args:
+            cvars: all decision variables for compression.
+        """
+        counter = collections.Counter()
+        for id_1, id_2 in self.true_facts:
+            counter.update([id_1, id_2])
+        
+        common_counts = counter.most_common(self.context_k)
+        common_ids = set([ic[0] for ic in common_counts])
+        logging.info(f'Restricting inner context to {common_ids}')
+        
+        # Heuristically prune context with depth > 1
+        for depth in range(1, self.max_depth):
+            for token in self.ids:
+                if token not in common_ids:
+                    for pos in range(self.max_length):
+                        context_var = cvars.context_vars[pos][depth][token]
+                        context_var.VarHintVal = 0
+
     def _add_mips_start(self, solution, cvars):
         """ Add naive solution as starting point (assumes no shortcuts).
         
@@ -421,23 +455,6 @@ class IlpCompression():
             cvars: all decision variables for schema compression.
         """
         logging.info('Pruning search space ...')
-        counter = collections.Counter()
-        for id_1, id_2 in self.true_facts:
-            counter.update([id_1, id_2])
-        
-        common_counts = counter.most_common(self.context_k)
-        common_ids = set([ic[0] for ic in common_counts])
-        logging.info(f'Restricting inner context to {common_ids}')
-        
-        # Heuristically prune context with depth > 1
-        for depth in range(1, self.max_depth):
-            for token in self.ids:
-                if token not in common_ids:
-                    for pos in range(self.max_length):
-                        context_var = cvars.context_vars[pos][depth][token]
-                        context_var.VarHintVal = 0
-                        # name = f'P{pos}_D{depth}_{token}_isZero'
-                        # model.addConstr(context_var == 0, name=name)
         
         # Avoid nesting mutually exclusive facts
         for pos in range(self.max_length):

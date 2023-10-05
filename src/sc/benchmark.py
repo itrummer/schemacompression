@@ -13,17 +13,16 @@ import sc.llm
 import time
 
 
-def benchmark(ddl, solver, model, timeout_s):
+def benchmark(ddl, solver, **kwargs):
     """ Benchmarks given prompt generation method.
     
     Args:
         ddl: schema description of database.
         solver: solves prompt generation problem.
-        model: name of model that is prompted.
-        timeout_s: timeout in seconds.
+        kwargs: keyword arguments for solver.
     """
     start_s = time.time()
-    result = solver(ddl, model, timeout_s)
+    result = solver(ddl, **kwargs)
     total_s = time.time() - start_s
     result['total_s'] = total_s
     solution = result['solution']
@@ -32,7 +31,7 @@ def benchmark(ddl, solver, model, timeout_s):
     return result
 
 
-def solver_greedy(ddl, *args):
+def solver_greedy(ddl, **kwargs):
     """ Compress input schema greedily.
     
     Args:
@@ -49,13 +48,12 @@ def solver_greedy(ddl, *args):
     return {'solution':solution}
 
 
-def solver_gurobi(ddl, model, timeout_s):
+def solver_gurobi(ddl, **kwargs):
     """ Compress schema via integer linear programming.
     
     Args:
         ddl: database schema description in SQL.
-        model: name of model to optimize for.
-        timeout_s: timeout measured in seconds.
+        kwargs: keyword arguments for solver.
     
     Returns:
         result dictionary containing solution and statistics.
@@ -63,12 +61,11 @@ def solver_gurobi(ddl, model, timeout_s):
     parser = sc.parser.SchemaParser()
     schema = parser.parse(ddl)
     ilpCompression = sc.compress.gurobi.IlpCompression(
-        schema, llm_name=model, max_depth=3, 
-        context_k=10, timeout_s=timeout_s)
+        schema, max_depth=3, context_k=10, **kwargs)
     return ilpCompression.compress()
 
 
-def solver_pretty(ddl, *args):
+def solver_pretty(ddl, **kwargs):
     """ Pretty formating of DDL SQL commands.
     
     Args:
@@ -82,7 +79,7 @@ def solver_pretty(ddl, *args):
     return {'solution':solution}
 
 
-def solver_promptbase(ddl, *args):
+def solver_promptbase(ddl, **kwargs):
     """ Use prompt proposed at promptbase.com.
     
     This corresponds to the schema description used
@@ -131,6 +128,15 @@ if __name__ == '__main__':
     parser.add_argument('inputdir', type=str, help='Path of input directory')
     parser.add_argument('timeout_s', type=int, help='Timeout seconds per test')
     parser.add_argument('outpath', type=str, help='Path to output file')
+    parser.add_argument(
+        '--start', type=bool, default=True, 
+        help='Greedy solution as start')
+    parser.add_argument(
+        '--hints', type=bool, default=True, 
+        help='Hints for variable values')
+    parser.add_argument(
+        '--merge', type=bool, default=True, 
+        help='Merge columns by annotations')
     args = parser.parse_args()
     
     model = 'text-davinci-003'
@@ -141,10 +147,14 @@ if __name__ == '__main__':
     
     results = []
     for file_name, ddl in zip(file_names, ddls):
-        greedy_result = benchmark(ddl, solver_greedy, model, args.timeout_s)
-        gurobi_result = benchmark(ddl, solver_gurobi, model, args.timeout_s)
-        pretty_result = benchmark(ddl, solver_pretty, model, args.timeout_s)
-        prompt_result = benchmark(ddl, solver_promptbase, model, args.timeout_s)
+        greedy_result = benchmark(ddl, solver_greedy, {})
+        gurobi_args = {
+            'llm_name':model, 'timeout_s':args.timeout_s, 
+            'start':args.start, 'hints':args.hints, 
+            'merge':args.merge}
+        gurobi_result = benchmark(ddl, solver_gurobi, gurobi_args)
+        pretty_result = benchmark(ddl, solver_pretty, {})
+        prompt_result = benchmark(ddl, solver_promptbase, {})
         result = {
             'file_name':file_name, 'greedy':greedy_result, 
             'gurobi':gurobi_result, 'pretty':pretty_result, 
