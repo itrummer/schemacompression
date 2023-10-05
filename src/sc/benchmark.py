@@ -147,6 +147,7 @@ if __name__ == '__main__':
         '--merge', type=bool, default=True, 
         help='Merge columns by annotations')
     args = parser.parse_args()
+    print(args)
     
     model = 'text-davinci-003'
     
