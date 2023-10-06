@@ -96,16 +96,23 @@ class IlpCompression():
                 if self.start:
                     self._add_mips_start(self.naive_solution, all_vars)
                 model.optimize()
-                solution = self._extract_solution(all_vars)
+                
+                if model.SolCount > 0:
+                    solution = self._extract_solution(all_vars)
+                    solved = True
+                else:
+                    solution = ''
+                    solved = False
                 nr_variables = model.NumVars
                 nr_constraints = model.NumConstrs
-                mip_gap = model.MIPGap                
+                mip_gap = model.MIPGap
                 result = {
                     'solution':solution, 'nr_variables':nr_variables, 
                     'nr_constraints':nr_constraints, 'mip_gap':mip_gap,
                     'max_length':self.max_length, 'max_depth':self.max_depth,
                     'timeout_s':self.timeout_s, 'context_k':self.context_k,
-                    'start':self.start, 'hints':self.hints, 'merge':self.merge}
+                    'start':self.start, 'hints':self.hints, 'merge':self.merge,
+                    'solved':solved}
                 return result
 
     def _add_constraints(self, model, cvars):
