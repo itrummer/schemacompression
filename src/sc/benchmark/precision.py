@@ -6,6 +6,7 @@ Created on Jan 15, 2024
 import argparse
 import json
 import openai
+import pathlib
 import sqlite3
 import time
 
@@ -47,6 +48,7 @@ def result_is_empty(db_path, sql):
     Returns:
         True iff the query executes and its result is empty.
     """
+    print(f'SQL: {sql}')
     db_path = str(db_path)
     with sqlite3.connect(db_path) as connection:
         cursor = connection.cursor()
@@ -55,7 +57,8 @@ def result_is_empty(db_path, sql):
             table_rows = cursor.fetchall()
             nr_rows = len(table_rows)
             return True if nr_rows == 0 else False
-        except:
+        except Exception as e:
+            print(e)
             return False
 
     
@@ -70,11 +73,11 @@ def validate(db_path, gold_sql, sql):
     Returns:
         True iff both input queries yield the same result.
     """
-    sql_1 = f'select * from {gold_sql} except {sql}'
-    sql_2 = f'select * from {sql} except {gold_sql}'
-    count_sql = f'(select count(*) from {sql})'
-    count_gold = f'(select count(*) from {gold_sql})'
-    sql_3 = f'select * from {count_sql} except {count_gold}'
+    sql_1 = f'{gold_sql} except {sql}'
+    sql_2 = f'{sql} except {gold_sql}'
+    count_sql = f'select count(*) from ({sql})'
+    count_gold = f'select count(*) from ({gold_sql})'
+    sql_3 = f'{count_sql} except {count_gold}'
     
     for sql in [sql_1, sql_2, sql_3]:
         if not result_is_empty(db_path, sql):
@@ -97,6 +100,7 @@ def nlqi_success(schema, question, gold_sql, db_path):
     """
     sql = text_to_sql(schema, question)
     success = validate(db_path, gold_sql, sql)
+    print(f'Success: {success}')
     return success
     
     
@@ -106,6 +110,8 @@ if __name__ == '__main__':
     parser.add_argument('schemas', type=str, help='Path to schema file')
     parser.add_argument('data_dir', type=str, help='Path to SPIDER data')
     parser.add_argument('queries', type=str, help='Path to query file')
+    parser.add_argument('limit', type=int, help='Maximal number of queries')
+    parser.add_argument('method', type=str, help='Compression method to test')
     parser.add_argument('ai_key', type=str, help='OpenAI access key')
     args = parser.parse_args()
     
@@ -119,24 +125,34 @@ if __name__ == '__main__':
     db2compressed = {}
     for schema in schemas:
         original = schema['pretty']['solution']
-        compressed = schema['compressed']['solution']
-        db_name = original['pretty']['file_name'][:-4]
+        compressed = schema[args.method]['solution']
+        file_path = schema['file_name']
+        file_name = pathlib.Path(file_path).name
+        db_name = file_name[:-4]
         db2original[db_name] = original
         db2compressed[db_name] = compressed
     
+    
+    print(db2original.keys())
+    
+    queries = [q for q in queries if q['db_id'] in db2original]
+    queries = queries[:args.limit]
+    
     results = []
-    for db_name, db_queries in queries.items():
-        for db_query in db_queries:
-            original = db2original[db_name]
-            compressed = db2compressed[db_name]
-            db_path = Path(args.data_dir) / db_name / f'{db_name}.sqlite'
-            question = db_query['question']
-            gold = db_query['query']
-            
-            db_results = {'db_name':db_name, 'db_query':db_query}
-            tests = [('original', original), ('compressed', compressed)]
-            for test_name, schema in tests:
-                success = nlqi_success(original, question, gold, db_path)
-                db_results[test_name] = success
-            
-            results.append(db_results)
+    for query_idx, query in enumerate(queries, 1):
+        print(f'Processing query nr. {query_idx} ...')
+        db_name = query['db_id']
+        print(f'DB name: {db_name}')
+        original = db2original[db_name]
+        compressed = db2compressed[db_name]
+        db_path = Path(args.data_dir) / db_name / f'{db_name}.sqlite'
+        question = query['question']
+        gold = query['query']
+        
+        db_results = {'db_name':db_name, 'db_query':query}
+        tests = [('original', original), ('compressed', compressed)]
+        for test_name, schema in tests:
+            success = nlqi_success(original, question, gold, db_path)
+            db_results[test_name] = success
+        
+        results.append(db_results)

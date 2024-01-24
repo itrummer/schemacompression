@@ -215,5 +215,5 @@ CREATE TABLE lineitem
 );
     """
     parser = SchemaParser()
-    sql = parser.parse(ddl)
+    sql = parser.format(ddl)
     print(sql)

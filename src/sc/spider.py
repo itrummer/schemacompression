@@ -31,6 +31,8 @@ def parse_spider(spider_db):
         if not col_name == '*':
             if col_type in type_map:
                 col_type = type_map[col_type]
+            if ' ' in col_name or col_name[0] in [str(i) for i in range(10)]:
+                col_name = f'"{col_name}"'
             column = Column(col_name, col_type, [col_type, 'NOT NULL'], False)
             table = tables[table_idx]
             table.columns.append(column)

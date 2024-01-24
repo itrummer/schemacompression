@@ -13,6 +13,21 @@ import sc.llm
 import time
 
 
+def decompose_ddl(ddl):
+    """ Decomposes DDL script into DDL statements.
+    
+    Args:
+        ddl: DDL script.
+    
+    Returns:
+        list of DDL statements.
+    """
+    ddl = ddl.strip()
+    parts = ddl.split(';')
+    parts = [p for p in parts if p]
+    return parts
+    
+    
 def benchmark(ddl, solver, **kwargs):
     """ Benchmarks given prompt generation method.
     
@@ -43,10 +58,16 @@ def solver_greedy(ddl, **kwargs):
         dictionary mapping to solution.
     """
     parser = sc.parser.SchemaParser()
-    schema = parser.parse(ddl)
-    schema.merge_columns()
-    parts = sc.compress.greedy.greedy_parts(schema)
-    solution = ''.join(parts)
+    original_ddls = decompose_ddl(ddl)
+    compressed_ddls = []
+    for original_ddl in original_ddls:
+        schema = parser.parse(original_ddl)
+        schema.merge_columns()
+        parts = sc.compress.greedy.greedy_parts(schema)
+        compressed_ddl = ''.join(parts)
+        compressed_ddls += [compressed_ddl]
+    
+    solution = '\n'.join(compressed_ddls)
     return {'solution':solution}
 
 
@@ -77,7 +98,14 @@ def solver_pretty(ddl, **kwargs):
         result dictionary containing solution.
     """
     parser = sc.parser.SchemaParser()
-    solution = parser.format(ddl)
+    original_ddls = decompose_ddl(ddl)
+    compressed_ddls = []
+    for original_ddl in original_ddls:
+        print(original_ddl)
+        compressed_ddl = parser.format(original_ddl)
+        compressed_ddls += [compressed_ddl]
+    
+    solution = '\n'.join(compressed_ddls)
     return {'solution':solution}
 
 
@@ -95,8 +123,14 @@ def solver_promptbase(ddl, **kwargs):
         dictionary mapping containing solution attribute.
     """
     parser = sc.parser.SchemaParser()
-    schema = parser.parse(ddl)
-    solution = schema.text()
+    original_ddls = decompose_ddl(ddl)
+    compressed_ddls = []
+    for original_ddl in original_ddls:
+        schema = parser.parse(original_ddl)
+        compressed_ddl = schema.text()
+        compressed_ddls += [compressed_ddl]
+    
+    solution = '\n'.join(compressed_ddls)
     return {'solution':solution}
 
 
@@ -149,8 +183,8 @@ if __name__ == '__main__':
     
     results = []
     for file_name, ddl in zip(file_names, ddls):
-        greedy_result = benchmark(ddl, solver_greedy)
         pretty_result = benchmark(ddl, solver_pretty)
+        greedy_result = benchmark(ddl, solver_greedy)
         prompt_result = benchmark(ddl, solver_promptbase)
         result = {
             'file_name':file_name, 'greedy':greedy_result, 

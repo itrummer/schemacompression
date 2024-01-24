@@ -122,7 +122,8 @@ class Schema():
                 from_col = fkey.from_columns[0]
                 to_tbl = fkey.to_table
                 to_col = fkey.to_columns[0]
-                annotation = f'foreign key references {to_tbl}({to_col})'
+                annotation = \
+                    f'foreign key ({from_col}) references {to_tbl}({to_col})'
                 self._add_annotation(from_tbl, from_col, annotation)
             else:
                 self.fkeys.append(fkey)
