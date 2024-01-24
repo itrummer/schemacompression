@@ -20,6 +20,14 @@ export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${GUROBI_HOME}/lib"
 7. Check that Gurobi is installed: `gurobi_cl --version`.
 8. Install a license to enable solving large problems. E.g., the experiments used a Gurobi academic license WLS. For this license, download the `gurobi.lic` file and copy it into the home directory of the server executing optimization.
 
+To extract schemata from the SPIDER benchmark, use the file `src/sc/spider.py` with the following parameters:
+
+| Parameter | Explanation |
+| --- | --- |
+| inpath | Path to `schema.json` in the SPIDER directory |
+| top_k | How many schemata to extract |
+| outdir | Write extracted schemata into this directory |
+
 ## Evaluating Compression Methods
 
 Use `src/sc/benchmark/performance.py` to compare different schema compression methods in terms of their run time and compression ratio. The script takes the following command line parameters:
@@ -37,3 +45,5 @@ Optionally, users can specify the following flags for ablation studies:
 | --nostart | Do not use greedy solutions as ILP start |
 | --nohints | Do not specify hints for ILP variables |
 | --nomerge | Do not merge column annotations together |
+| --noilp | Do not execute ILP approach |
+
