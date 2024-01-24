@@ -1,4 +1,5 @@
-# schemacompression
+# Schemonic
+
 Compress database schemata to reduce cost for LLM processing
 
 ## Preparing Experiments
