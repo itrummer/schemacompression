@@ -131,14 +131,13 @@ if __name__ == '__main__':
     parser.add_argument('timeout_s', type=int, help='Timeout seconds per test')
     parser.add_argument('outpath', type=str, help='Path to output file')
     parser.add_argument(
-        '--nostart', action='store_true', 
-        help='Greedy solution as start')
+        '--nostart', action='store_true', help='Greedy solution as start')
     parser.add_argument(
-        '--nohints', action='store_true', 
-        help='Hints for variable values')
+        '--nohints', action='store_true', help='Hints for variable values')
     parser.add_argument(
-        '--nomerge', action='store_true', 
-        help='Merge columns by annotations')
+        '--nomerge', action='store_true', help='Merge columns by annotations')
+    parser.add_argument(
+        '--noilp', action='store_true', help='Do not execute ILP approach')
     args = parser.parse_args()
     print(args)
     
@@ -151,17 +150,20 @@ if __name__ == '__main__':
     results = []
     for file_name, ddl in zip(file_names, ddls):
         greedy_result = benchmark(ddl, solver_greedy)
-        gurobi_args = {
-            'llm_name':model, 'timeout_s':args.timeout_s, 
-            'start':not args.nostart, 'hints':not args.nohints, 
-            'merge':not args.nomerge}
-        gurobi_result = benchmark(ddl, solver_gurobi, **gurobi_args)
         pretty_result = benchmark(ddl, solver_pretty)
         prompt_result = benchmark(ddl, solver_promptbase)
         result = {
             'file_name':file_name, 'greedy':greedy_result, 
-            'gurobi':gurobi_result, 'pretty':pretty_result, 
-            'prompt':prompt_result}
+            'pretty':pretty_result, 'prompt':prompt_result}
+
+        if not args.noilp:
+            gurobi_args = {
+                'llm_name':model, 'timeout_s':args.timeout_s, 
+                'start':not args.nostart, 'hints':not args.nohints, 
+                'merge':not args.nomerge}
+            gurobi_result = benchmark(ddl, solver_gurobi, **gurobi_args)
+            result['gurobi'] = gurobi_result
+        
         results.append(result)
         
         with open(args.outpath, 'w') as file:
