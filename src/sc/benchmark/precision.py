@@ -113,6 +113,7 @@ if __name__ == '__main__':
     parser.add_argument('limit', type=int, help='Maximal number of queries')
     parser.add_argument('method', type=str, help='Compression method to test')
     parser.add_argument('ai_key', type=str, help='OpenAI access key')
+    parser.add_argument('outpath', type=str, help='Path to result file')
     args = parser.parse_args()
     
     with open(args.schemas) as file:
@@ -156,3 +157,6 @@ if __name__ == '__main__':
             db_results[test_name] = success
         
         results.append(db_results)
+    
+    with open(args.outpath, 'w') as file:
+        json.dump(results, file)
