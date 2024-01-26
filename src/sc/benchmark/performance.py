@@ -82,11 +82,17 @@ def solver_gurobi(ddl, **kwargs):
         result dictionary containing solution and statistics.
     """
     parser = sc.parser.SchemaParser()
-    schema = parser.parse(ddl)
-    ilpCompression = sc.compress.gurobi.IlpCompression(
-        schema, max_depth=3, context_k=10, **kwargs)
-    return ilpCompression.compress()
-
+    original_ddls = decompose_ddl(ddl)
+    compression_results = []
+    for original_ddl in original_ddls:
+        schema = parser.parse(original_ddl)
+        ilpCompression = sc.compress.gurobi.IlpCompression(
+            schema, max_depth=3, context_k=10, **kwargs)
+        compression_result = ilpCompression.compress()
+        compression_results += [compression_result]
+    
+    solution = '\n'.join([c['solution'] for c in compression_results])
+    return {'solution':solution, 'results_by_table':compression_results}
 
 def solver_pretty(ddl, **kwargs):
     """ Pretty formating of DDL SQL commands.
