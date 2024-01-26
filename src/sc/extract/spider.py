@@ -34,7 +34,7 @@ def parse_spider(spider_db):
             if ' ' in col_name or col_name[0] in [str(i) for i in range(10)] \
                 or col_name[0] == '%' or '(' in col_name or ')' in col_name: 
                 col_name = f'"{col_name}"'
-            column = Column(col_name, col_type, [col_type, 'NOT NULL'], False)
+            column = Column(col_name, col_type, [col_type], False)
             table = tables[table_idx]
             table.columns.append(column)
     
