@@ -6,7 +6,7 @@ Compress database schemata to reduce cost for LLM processing
 
 Tested with c5.4xlarge EC 2 instance with Ubuntu 22.04 installed. All commands are executed from Ubuntu user home directory.
 
-1. Download benchmark schemata [here](https://drive.google.com/file/d/1KrXwsJKv0L2J9p24cYkvyDxQyfRn5BD-/view?usp=sharing).
+1. Download benchmark schemata [here](https://drive.google.com/file/d/1KrXwsJKv0L2J9p24cYkvyDxQyfRn5BD-/view?usp=sharing), [here](https://drive.google.com/file/d/1tVVh6gMSbG1yiLl8_IAj2ALAAHtQcDMZ/view?usp=sharing), and [here](https://drive.google.com/file/d/1ny1OmKxQcoVyR7rHvqH9qy7fRt1mRcg1/view?usp=sharing).
 2. Install Gurobi for Python: `sudo pip install gurobipy`
 3. Download Gurobi solver (tested with version 10.0.3): `wget https://packages.gurobi.com/10.0/gurobi10.0.3_linux64.tar.gz`
 4. Unpack Gurobi solver: `tar xvfz gurobi10.0.3_linux64.tar.gz`
@@ -47,3 +47,7 @@ Optionally, users can specify the following flags for ablation studies:
 | --nomerge | Do not merge column annotations together |
 | --noilp | Do not execute ILP approach |
 
+E.g., assuming that `python3.10` invokes the Python interpreter, generate results using the following command on Ubuntu:
+```
+PYTHONPATH=src python3.10 src/sc/benchmark/performance.py /home/ubuntu/publicbi 1200 publicbi.json &> publicbiLog &
+```
