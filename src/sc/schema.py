@@ -157,13 +157,12 @@ class Schema():
         false_facts = []
         
         # Which columns belong to which tables?
-        for table in self.tables:
-            for column in table.columns:
-                col_name = self._full_name(table, column)
-                for table in self.tables:
-                    tbl_name = table.name
-                    predicate = table.as_predicate()
-                    if tbl_name == table.name:
+        for first_table in self.tables:
+            for column in first_table.columns:
+                col_name = self._full_name(first_table, column)
+                for second_table in self.tables:
+                    predicate = second_table.as_predicate()
+                    if first_table.name == second_table.name:
                         true_fact = (predicate, col_name)
                         true_facts.append(true_fact)
                     else:
