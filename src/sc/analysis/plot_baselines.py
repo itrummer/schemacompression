@@ -37,9 +37,9 @@ if __name__ == '__main__':
         cur_result.append(raw_result['greedy']['total_s'])
         cur_result.append(raw_result['gurobi']['total_s'])
         
-        cur_result.append(raw_result['gurobi']['nr_variables'])
-        cur_result.append(raw_result['gurobi']['nr_constraints'])
-        cur_result.append(raw_result['gurobi']['mip_gap'])
+        # cur_result.append(raw_result['gurobi']['nr_variables'])
+        # cur_result.append(raw_result['gurobi']['nr_constraints'])
+        # cur_result.append(raw_result['gurobi']['mip_gap'])
         results.append(cur_result)
     
     result_df = pd.DataFrame(results)
@@ -47,5 +47,6 @@ if __name__ == '__main__':
         'filename', 'sqlsize', 'pbsize', 'greedysize', 'gurobisize',
         'sqlrelsize', 'pbrelsize', 'greedyrelsize', 'gurobirelsize',
         'sqltime', 'pbtime', 'greedytime', 'gurobitime',
-        'nr_variables', 'nr_constraints', 'mip_gap']
+        # 'nr_variables', 'nr_constraints', 'mip_gap'
+        ]
     result_df.to_csv(args.outpath)
