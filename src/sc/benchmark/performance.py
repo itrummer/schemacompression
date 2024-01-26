@@ -83,8 +83,9 @@ def solver_gurobi(ddl, **kwargs):
     """
     parser = sc.parser.SchemaParser()
     schema = parser.parse(ddl)
-    return sc.compress.gurobi.IlpCompression(
+    ilpCompression = sc.compress.gurobi.IlpCompression(
         schema, max_depth=2, context_k=3, **kwargs)
+    return ilpCompression.compress()
 
 
 def solver_pretty(ddl, **kwargs):
