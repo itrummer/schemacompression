@@ -47,3 +47,7 @@ Optionally, users can specify the following flags for ablation studies:
 | --nomerge | Do not merge column annotations together |
 | --noilp | Do not execute ILP approach |
 
+E.g., assuming that `python3.10` invokes the Python interpreter, generate results using the following command on Ubuntu:
+```
+PYTHONPATH=src python3.10 src/sc/benchmark/performance.py /home/ubuntu/publicbi 1200 publicbi.json &> publicbiLog &
+```
