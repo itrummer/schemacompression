@@ -128,6 +128,23 @@ class Schema():
             else:
                 self.fkeys.append(fkey)
     
+    def full_name(self, table, column):
+        """ Returns fully qualified column name.
+        
+        Args:
+            table: column belongs to this table.
+            column: return name for this column.
+        
+        Returns:
+            column with added table name (if ambiguous).
+        """
+        col_name = column.name
+        if self._is_ambiguous(col_name):
+            tbl_name = table.name
+            return f'{tbl_name}.{col_name}'
+        else:
+            return col_name
+    
     def get_annotations(self):
         """ Returns all annotations. """
         tags = set()
@@ -141,13 +158,20 @@ class Schema():
         """ Returns list of all columns. """
         return [c for t in self.tables for c in t.columns]
     
-    def get_column_names(self, full_names=False):
-        """ Returns all column names as list. """
+    def get_column_names(self, full_names=True):
+        """ Returns all column names as list.
+        
+        Args:
+            full_names: prefix ambiguous columns with table name.
+        
+        Returns:
+            List of column names.
+        """
         columns = []
         for table in self.tables:
             for column in table.columns:
                 if full_names:
-                    col_name = self._full_name(table, column)
+                    col_name = self.full_name(table, column)
                 else:
                     col_name = column.name
                 
@@ -168,7 +192,7 @@ class Schema():
         for table in self.tables:
             for column in self.get_columns():
                 predicate = table.as_predicate()
-                col_name = column.name
+                col_name = self.full_name(table, column)
                 false_fact = (predicate, col_name)
                 false_facts.add(false_fact)
         
@@ -176,7 +200,7 @@ class Schema():
         for table in self.tables:
             for column in table.columns:
                 predicate = table.as_predicate()
-                col_name = column.name
+                col_name = self.full_name(table, column)
                 true_fact = (predicate, col_name)
                 true_facts.add(true_fact)
                 false_facts.remove(true_fact)
@@ -284,23 +308,6 @@ class Schema():
         for prefix_length in range(2, id_length+1):
             prefix = identifier[:prefix_length]
             counter.update([prefix])
-    
-    def _full_name(self, table, column):
-        """ Returns fully qualified column name.
-        
-        Args:
-            table: column belongs to this table.
-            column: return name for this column.
-        
-        Returns:
-            column with added table name (if ambiguous).
-        """
-        col_name = column.name
-        if self._is_ambiguous(col_name):
-            tbl_name = table.name
-            return f'{tbl_name}.{col_name}'
-        else:
-            return col_name
     
     def _is_ambiguous(self, col_name):
         """ Checks if column name is ambiguous.

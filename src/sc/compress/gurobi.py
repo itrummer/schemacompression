@@ -565,7 +565,7 @@ class IlpCompression():
         Returns:
             List of activated tokens per position.
         """
-        parts = sc.compress.greedy.greedy_parts(self.schema)
+        parts = sc.compress.greedy.greedy_parts(self.schema, full_names=True)
         tokens_by_pos = []
         last_pos_tokens = []
         for part in parts:
