@@ -141,14 +141,17 @@ class Schema():
         """ Returns list of all columns. """
         return [c for t in self.tables for c in t.columns]
     
-    def get_column_names(self):
+    def get_column_names(self, full_names=False):
         """ Returns all column names as list. """
         columns = []
         for table in self.tables:
             for column in table.columns:
-                full_name = self._full_name(table, column)
-                columns.append(full_name)
-        
+                if full_names:
+                    col_name = self._full_name(table, column)
+                else:
+                    col_name = column.name
+                
+                columns.append(col_name)
         return columns
     
     def get_facts(self):
