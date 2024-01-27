@@ -152,42 +152,45 @@ class Schema():
         return columns
     
     def get_facts(self):
-        """ Returns tuple with true facts and false facts. """
-        true_facts = []
-        false_facts = []
+        """ Returns tuple with true facts and false facts.
         
-        # Which columns belong to which tables?
-        for first_table in self.tables:
-            for column in first_table.columns:
-                col_name = self._full_name(first_table, column)
-                for second_table in self.tables:
-                    predicate = second_table.as_predicate()
-                    if first_table.name == second_table.name:
-                        true_fact = (predicate, col_name)
-                        true_facts.append(true_fact)
-                    else:
-                        false_fact = (predicate, col_name)
-                        false_facts.append(false_fact)
+        Attention: we assume that columns are only mentioned
+        within the context of their respective tables! Otherwise,
+        equal column names across tables could lead to ambiguity.
+        """
+        false_facts = set()
+        true_facts = set()
+        
+        # Table-column associations are false by default
+        for table in self.tables:
+            for column in self.get_columns():
+                predicate = table.as_predicate()
+                col_name = column.name
+                false_fact = (predicate, col_name)
+                false_facts.add(false_fact)
+        
+        # Consider actual table-column associations
+        for table in self.tables:
+            for column in table.columns:
+                predicate = table.as_predicate()
+                col_name = column.name
+                true_fact = (predicate, col_name)
+                true_facts.add(true_fact)
+                false_facts.remove(true_fact)
         
         # Which annotations belong to which columns?
         for annotation in self.get_annotations():
             for table in self.tables:
                 for column in table.columns:
-                    col_name = self._full_name(table, column)
+                    col_name = column.name
                     if annotation in column.annotations:
                         true_fact = (col_name, annotation)
-                        true_facts.append(true_fact)
+                        true_facts.add(true_fact)
                     else:
                         false_fact = (col_name, annotation)
-                        false_facts.append(false_fact)
+                        false_facts.add(false_fact)
 
-        # Tables have no annotations
-        # for annotation in self.get_annotations():
-            # false_facts.append((annotation, 'table'))
-            # for table in self.get_tables():
-                # false_facts.append((table, annotation))
-
-        return true_facts, false_facts
+        return list(true_facts), list(false_facts)
     
     def get_identifiers(self):
         """ Retrieve all identifiers that appear in facts. 
