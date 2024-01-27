@@ -209,7 +209,7 @@ class Schema():
         for annotation in self.get_annotations():
             for table in self.tables:
                 for column in table.columns:
-                    col_name = column.name
+                    col_name = self.full_name(table, column)
                     if annotation in column.annotations:
                         true_fact = (col_name, annotation)
                         true_facts.add(true_fact)
