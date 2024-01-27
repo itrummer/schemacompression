@@ -382,8 +382,8 @@ class IlpCompression():
         for pos in range(self.max_length):
             for token in self.ids:
                 cvars.decision_vars[pos][token].Start = 0
-                for rep_var in cvars.representation_vars[pos][token].values():
-                    rep_var.Start = 0
+                # for rep_var in cvars.representation_vars[pos][token].values():
+                    # rep_var.Start = 0
                 for depth in range(self.max_depth):
                     cvars.context_vars[pos][depth][token].Start = 0
         
@@ -392,8 +392,8 @@ class IlpCompression():
             for token in tokens:
                 cvars.decision_vars[pos][token].Start = 1
                 # Assumption: given solution does not use shortcuts
-                if token not in ['(', ')']:
-                    cvars.representation_vars[pos][token][''].Start = 1
+                # if token not in ['(', ')']:
+                    # cvars.representation_vars[pos][token][''].Start = 1
         
         # Create sequence of contexts
         contexts = [[]]
