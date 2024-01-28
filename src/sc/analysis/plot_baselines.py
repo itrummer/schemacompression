@@ -18,6 +18,10 @@ if __name__ == '__main__':
     with open(args.inpath) as file:
         raw_results = json.load(file)
     
+    for raw_result in raw_results:
+        if not raw_result['gurobi']['solved']:
+            raw_result['gurobi']['size'] = raw_result['greedy']['size']
+    
     results = []
     for raw_result in raw_results:
         cur_result = []
