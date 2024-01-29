@@ -36,21 +36,25 @@ if __name__ == '__main__':
         scaled_sizes = [s / min_size for s in sizes]
         cur_result += scaled_sizes
         
+        fees = [s * 6 / 1000.0 for s in sizes]
+        cur_result += fees
+        
         cur_result.append(raw_result['pretty']['total_s'])
         cur_result.append(raw_result['prompt']['total_s'])
         cur_result.append(raw_result['greedy']['total_s'])
         cur_result.append(raw_result['gurobi']['total_s'])
         
-        # cur_result.append(raw_result['gurobi']['nr_variables'])
-        # cur_result.append(raw_result['gurobi']['nr_constraints'])
-        # cur_result.append(raw_result['gurobi']['mip_gap'])
+        cur_result.append(raw_result['gurobi']['nr_variables'])
+        cur_result.append(raw_result['gurobi']['nr_constraints'])
+        cur_result.append(raw_result['gurobi']['mip_gap'])
         results.append(cur_result)
     
     result_df = pd.DataFrame(results)
     result_df.columns = [
         'filename', 'sqlsize', 'pbsize', 'greedysize', 'gurobisize',
         'sqlrelsize', 'pbrelsize', 'greedyrelsize', 'gurobirelsize',
+        'sqlcents', 'pbcents', 'greedycents', 'gurobicents',
         'sqltime', 'pbtime', 'greedytime', 'gurobitime',
-        # 'nr_variables', 'nr_constraints', 'mip_gap'
+        'nr_variables', 'nr_constraints', 'mip_gap'
         ]
     result_df.to_csv(args.outpath)
